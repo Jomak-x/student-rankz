@@ -41,17 +41,37 @@ export async function createEphemeralDatabase(
   const { drizzle } = await import("drizzle-orm/node-postgres");
   const { migrate } = await import("drizzle-orm/node-postgres/migrator");
   const db = drizzle(connectionString);
-  await migrate(db, { migrationsFolder });
+  try {
+    await migrate(db, { migrationsFolder });
+  } catch (error) {
+    // Setup failed: clean up what this call created (its own pool and its
+    // own database only) and rethrow the original failure. A cleanup error
+    // is attached as `cleanupError` and never masks the original.
+    let cleanupError: unknown;
+    try {
+      await db.$client.end();
+    } catch (closeError) {
+      cleanupError ??= closeError;
+    }
+    try {
+      await dropEphemeralDatabase(databaseName);
+    } catch (dropError) {
+      cleanupError ??= dropError;
+    }
+    if (cleanupError !== undefined) {
+      (error as { cleanupError?: unknown }).cleanupError = cleanupError;
+    }
+    // Expose which database this call created so tests (and operators) can
+    // verify it was dropped.
+    (error as { ephemeralDatabaseName?: string }).ephemeralDatabaseName =
+      databaseName;
+    throw error;
+  }
   // Close the migrator pool so later DROP DATABASE cannot kill live
   // connections.
   await db.$client.end();
 
   return { connectionString, databaseName };
-}
-
-/** Close the connection pool behind a drizzle node-postgres instance. */
-export async function closeDb(db: { $client: { end: () => Promise<void> } }) {
-  await db.$client.end();
 }
 
 export async function dropEphemeralDatabase(
@@ -68,14 +88,7 @@ export async function dropEphemeralDatabase(
   }
 }
 
-export async function withEphemeralDatabase(
-  migrationsFolder: string,
-  fn: (db: EphemeralDatabase) => Promise<void>,
-): Promise<void> {
-  const ephemeral = await createEphemeralDatabase(migrationsFolder);
-  try {
-    await fn(ephemeral);
-  } finally {
-    await dropEphemeralDatabase(ephemeral.databaseName);
-  }
+/** Close the connection pool behind a drizzle node-postgres instance. */
+export async function closeDb(db: { $client: { end: () => Promise<void> } }) {
+  await db.$client.end();
 }
