@@ -57,7 +57,7 @@ npm run dev      # http://localhost:3000
 
 ## CI
 
-Every PR and push to `main` runs lint → typecheck → build → Playwright smoke tests (38 cases, desktop + mobile Chromium). Playwright traces and screenshots are uploaded as artifacts on failure. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) for setup and bootstrap steps.
+Every PR and push to `main` runs lint → typecheck → build → Playwright smoke tests (desktop + mobile Chromium; the full suite is the source of truth for case counts). Playwright traces and screenshots are uploaded as artifacts on failure. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) for setup and bootstrap steps.
 
 ## Related docs
 
