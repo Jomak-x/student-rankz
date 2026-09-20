@@ -37,6 +37,8 @@ Password recovery is **deferred**. The pinned SDK declares reset methods, but ho
 
 Auth pages, account, and API handlers are dynamic. API responses use `Cache-Control: private, no-store`; do not cache identity HTML at a CDN. `getVerifiedSession()` uses the server SDK, handles provider errors, and checks the returned identity, session owner, and expiry. Only a minimal `{ id, name, email }` identity reaches account UI. The provider subject is not yet an application identity or authorization claim.
 
+The exported `getVerifiedSession(): Promise<VerifiedSession>` interface is stable for integration: `{ status: "authenticated", user: { id, name, email } }`, `{ status: "anonymous" }`, or `{ status: "unavailable" }`. Callers must independently enforce resource ownership, affiliation, and all resource permissions; an authenticated result alone never authorizes access to another user’s drafts or university-restricted operations. Deny access for both non-authenticated states.
+
 The SDK's signed HTTP-only session-data cookie has an explicit **300-second TTL**. `no-store` prevents HTTP response caching, but does **not** remove that signed session cache. Logout clears cookies via the SDK; remote revocation or session changes may remain unseen until cache expiry. This is not immediate revocation. No sensitive writes are enabled here. Future account deletion, affiliation, or posting endpoints must enforce provider-fresh session validity using an API verified against the installed SDK/service, and independently authorize each operation. Do not reuse this cached display helper as proof of immediate revocation.
 
 ## Managed schema and branch isolation
