@@ -7,6 +7,7 @@ out/
 
 # Build artifacts
 .cache/
+tsconfig.tsbuildinfo
 
 # Environment
 .env*.local
