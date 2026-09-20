@@ -35,6 +35,7 @@ function nonemptyString(value: unknown): value is string {
  * Trust only the managed SDK's verified session, never client/localStorage identity.
  * SDK signed-cookie caching can delay revocation by 300 seconds. This read-only
  * identity check does not authorize affiliation, posting, or other sensitive writes.
+ * Callers must independently enforce resource ownership, affiliation, and permissions.
  */
 export async function getVerifiedSession(): Promise<VerifiedSession> {
   const auth = getAuth();
