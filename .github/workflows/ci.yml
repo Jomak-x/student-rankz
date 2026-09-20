@@ -36,6 +36,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Offline auth tests
+        run: npm run test:auth
+
       - name: Build
         run: npm run build
 
