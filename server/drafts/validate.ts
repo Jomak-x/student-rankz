@@ -303,8 +303,10 @@ export function parseUpdateInput(value: unknown): ParsedUpdateInput {
     result.body === undefined &&
     result.rating === undefined
   ) {
-    throw invalid(
-      "revision",
+    // Form-level error: no single field is at fault, so no field is
+    // pointed at. `revision` was valid here.
+    throw new DraftServiceError(
+      "INVALID_INPUT",
       "At least one of title, body or rating must be provided for an update.",
     );
   }
