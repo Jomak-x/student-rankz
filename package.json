@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts",
+    "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts tests/db/config.dbtest.ts tests/db/seed-cli.dbtest.ts tests/db/helpers.dbtest.ts",
     "test:affiliation": "node --import tsx --test tests/affiliation/service.dbtest.ts tests/affiliation/concurrency.dbtest.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
