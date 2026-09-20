@@ -1,0 +1,36 @@
+frontend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'app/**'
+      - 'components/**'
+      - 'hooks/**'
+      - 'lib/**'
+      - 'tests/**'
+      - 'playwright.config.ts'
+      - '**/*.css'
+      - 'next.config.*'
+      - 'tailwind.config.*'
+      - 'postcss.config.*'
+      - '.github/previews/**'
+
+backend:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'server/**'
+      - 'api/**'
+      - 'prisma/**'
+      - 'migrations/**'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/**'
+      - '.github/labeler.yml'
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - '.github/PULL_REQUEST_TEMPLATE.md'

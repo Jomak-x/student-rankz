@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Build artifacts
+.cache/
+tsconfig.tsbuildinfo
+
+# Environment
+.env*.local
+.env
+
+# Testing
+test-results/
+playwright-report/
+/test-screenshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
