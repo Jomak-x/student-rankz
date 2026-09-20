@@ -55,8 +55,13 @@ npm run dev      # http://localhost:3000
 - **Theme**: Light / dark / system preference persists via `next-themes`.
 - **No auth, no backend, no environment variables required** — builds and runs entirely offline.
 
+## CI
+
+Every PR and push to `main` runs lint → typecheck → build → Playwright smoke tests (38 cases, desktop + mobile Chromium). Playwright traces and screenshots are uploaded as artifacts on failure. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) for setup and bootstrap steps.
+
 ## Related docs
 
 - [docs/FRONTEND.md](docs/FRONTEND.md) — directory map, routes, fixture types, browser persistence, theme, shadcn/base-ui notes, npm commands, screenshot workflow, known limits
+- [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) — CI workflows, labels, branch protection bootstrap, PR process
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system architecture (backend worker, arriving in a separate PR)
 - [docs/BACKEND-SETUP.md](docs/BACKEND-SETUP.md) — backend setup guide (backend worker, arriving in a separate PR)

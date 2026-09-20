@@ -22,7 +22,7 @@ docs/BACKEND-SETUP.md   Backend setup guide — backend worker, separate PR
 README.md               Quick start and overview
 ```
 
-Read the relevant scoped doc before editing. Frontend work: read `docs/FRONTEND.md`. Backend/infrastructure work: read `docs/ARCHITECTURE.md` and `docs/BACKEND-SETUP.md`.
+Read the relevant scoped doc before editing. Frontend work: read `docs/FRONTEND.md`. Backend/infrastructure work: read `docs/ARCHITECTURE.md` and `docs/BACKEND-SETUP.md`. CI/workflow setup: read `docs/REPOSITORY-WORKFLOW.md`.
 
 ## Delegation guidance
 

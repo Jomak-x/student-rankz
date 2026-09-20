@@ -1,0 +1,18 @@
+# Labels used by .github/labeler.yml
+# Apply once after merge with: gh label create --repo <owner>/<repo> <name> --color <hex> --description <desc>
+# Or run: gh label create frontend  --color "e4710f" --description "App, components, hooks, lib, tests, styles"
+#         gh label create backend   --color "0075ca" --description "Server, API, database, migrations"
+#         gh label create ci        --color "f9c74f" --description "GitHub Actions and CI configuration"
+# Labels documentation and enhancement already exist in the repo.
+
+- name: frontend
+  color: "e4710f"
+  description: "App, components, hooks, lib, tests, styles"
+
+- name: backend
+  color: "0075ca"
+  description: "Server, API, database, migrations"
+
+- name: ci
+  color: "f9c74f"
+  description: "GitHub Actions and CI configuration"
