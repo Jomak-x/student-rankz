@@ -10,24 +10,44 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     let parsed: T | undefined;
     try {
       const item = window.localStorage.getItem(key);
-      if (item) parsed = JSON.parse(item) as T;
+      if (item) {
+        const candidate = JSON.parse(item) as T;
+        // Guard: if caller expects an array, only accept an array
+        if (Array.isArray(initialValue) && !Array.isArray(candidate)) {
+          // fall through — keep initialValue
+        } else {
+          parsed = candidate;
+        }
+      }
     } catch {
-      // ignore
+      // ignore parse errors
     }
     if (parsed !== undefined) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStoredValue(parsed);
     }
     setHydrated(true);
-  }, [key]);
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setValue = (value: T | ((val: T) => T)) => {
+  // Returns true if the write succeeded, false on storage error.
+  const setValue = (value: T | ((val: T) => T)): boolean => {
     try {
-      const valueToStore = value instanceof Function ? value(storedValue) : value;
-      setStoredValue(valueToStore);
+      // Read the freshest value from storage so concurrent same-page instances
+      // (e.g. two ReviewComposers) don't overwrite each other's writes.
+      let current = storedValue;
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (raw) current = JSON.parse(raw) as T;
+      } catch {
+        // fall back to React state
+      }
+
+      const valueToStore = value instanceof Function ? value(current) : value;
       window.localStorage.setItem(key, JSON.stringify(valueToStore));
+      setStoredValue(valueToStore);
+      return true;
     } catch {
-      // ignore
+      return false;
     }
   };
 

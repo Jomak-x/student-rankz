@@ -48,34 +48,28 @@ Existing repo labels `enhancement` and `documentation` are applied manually by c
 
 ---
 
-## Bootstrap: first-time setup (post-merge steps)
+## Bootstrap status
 
-The workflow files live on `polly/frontend-mvp` and are **not active until merged to `main`**. Until PR#2 merges:
+**CI** (`pull_request` trigger) — active now on all PRs, including PR#2. No merge to `main` needed for CI to run.
 
-- CI does not run on PR#2 itself.
-- Label automation does not run on PR#2.
-- No check runs appear on `main`.
+**Auto-labeler** (`pull_request_target` trigger) — activates after the workflow file lands on `main` (i.e. after PR#2 merges).
 
-After PR#2 merges to `main`, run these one-time steps:
-
-### 1 — Create missing labels
-
-The `frontend`, `backend`, and `ci` labels do not yet exist. Create them once:
+**Labels** — `frontend`, `backend`, `ci`, and `documentation` labels are created in the repo. The commands below are kept for future repos or label recreation:
 
 ```bash
-gh label create frontend  --repo Jomak-x/student-rankz \
+gh label create frontend  --repo <owner>/<repo> \
   --color "e4710f" --description "App, components, hooks, lib, tests, styles"
-gh label create backend   --repo Jomak-x/student-rankz \
+gh label create backend   --repo <owner>/<repo> \
   --color "0075ca" --description "Server, API, database, migrations"
-gh label create ci        --repo Jomak-x/student-rankz \
+gh label create ci        --repo <owner>/<repo> \
   --color "f9c74f" --description "GitHub Actions and CI configuration"
 ```
 
 Labels are documented in `.github/labels.yml` for reference.
 
-### 2 — Enable branch protection (after first successful check run)
+### Enable branch protection (after first successful check run)
 
-Do not configure required status checks on an empty check history — GitHub will reject PRs permanently if no check has ever run. Wait for the first PR after merge to complete its CI run, then:
+Wait for a CI run to complete successfully before configuring required status checks. Enabling required checks before any check run has recorded a name causes GitHub to treat every subsequent PR as failing the check even when the job passes.
 
 1. Go to **Settings → Branches → Add rule** for `main`.
 2. Enable **Require status checks to pass before merging**.

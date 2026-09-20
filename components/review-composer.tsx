@@ -33,6 +33,7 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
   const [body, setBody] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const [, setPending] = useLocalStorage<PendingReview[]>(
     "student-rankz-pending-reviews",
@@ -61,8 +62,12 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
       body: body.trim(),
       createdAt: new Date().toISOString(),
     };
-    setPending((prev) => [...prev, review]);
-    setSaved(true);
+    const ok = setPending((prev) => [...(Array.isArray(prev) ? prev : []), review]);
+    if (ok) {
+      setSaved(true);
+    } else {
+      setSaveError("Could not save — browser storage may be full or blocked.");
+    }
   };
 
   const handleOpenChange = (o: boolean) => {
@@ -74,6 +79,7 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
       setBody("");
       setErrors({});
       setSaved(false);
+      setSaveError("");
     }
   };
 
@@ -199,6 +205,9 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
               </div>
             </div>
 
+            {saveError && (
+              <p role="alert" className="text-xs text-destructive">{saveError}</p>
+            )}
             <div className="flex items-center justify-between pt-1">
               <Badge variant="secondary" className="text-xs font-normal">
                 Demo · saved locally only

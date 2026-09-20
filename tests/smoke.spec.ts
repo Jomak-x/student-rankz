@@ -144,6 +144,98 @@ test("compare selection persists across reload", async ({ page }, info) => {
   await expect(page.getByRole("link", { name: "Technical University of Munich" }).first()).toBeVisible();
 });
 
+// ─── Storage safety ──────────────────────────────────────────────────────────
+
+test("malformed compare storage falls back gracefully", async ({ page }) => {
+  await page.goto("/compare");
+  // Inject garbage — not an array
+  await page.evaluate(() => localStorage.setItem("student-rankz-compare", '{"not":"array"}'));
+  await page.reload();
+  // Should show empty state, no crash
+  await expect(page.getByRole("link", { name: /Browse universities/i })).toBeVisible();
+});
+
+test("compare storage with unknown/duplicate/over-limit IDs normalises to valid set", async ({ page }) => {
+  await page.goto("/compare");
+  // 6 entries: duplicate tum, unknown id, 4 valid ids — normalised to first 3 unique known
+  await page.evaluate(() =>
+    localStorage.setItem(
+      "student-rankz-compare",
+      JSON.stringify(["tum", "tum", "not-a-uni", "kth", "lmu", "sorbonne"])
+    )
+  );
+  await page.reload();
+  // 3 columns in the comparison table — normalization capped at 3
+  const tableHeaders = page.locator("table thead th a");
+  await expect(tableHeaders).toHaveCount(3);
+  // The first 3 unique known IDs (tum, kth, lmu) must appear
+  await expect(tableHeaders.filter({ hasText: /Technical University of Munich/i })).toHaveCount(1);
+  await expect(tableHeaders.filter({ hasText: /KTH Royal Institute/i })).toHaveCount(1);
+  await expect(tableHeaders.filter({ hasText: /Ludwig Maximilian/i })).toHaveCount(1);
+  // 4th valid ID must not be a table column; unknown id must not appear anywhere
+  await expect(tableHeaders.filter({ hasText: /Sorbonne/i })).toHaveCount(0);
+  await expect(page.getByText("not-a-uni")).not.toBeVisible();
+});
+
+test("review save failure preserves input and shows error instead of saved state", async ({ page }) => {
+  await page.goto("/universities/tum");
+  await page.getByRole("button", { name: /Write a review/i }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+
+  // Fill in form
+  await page.getByRole("button", { name: /4 stars/i }).click();
+  await page.getByLabel("Title").fill("Storage quota test");
+  await page.locator("#review-body").fill("This review tests what happens when the browser storage is completely full.");
+
+  // Make localStorage.setItem throw before submitting
+  await page.evaluate(() => {
+    window.localStorage.setItem = () => { throw new DOMException("QuotaExceededError"); };
+  });
+
+  await page.getByRole("button", { name: /Save draft/i }).click();
+
+  // Must NOT show the "Saved" success screen
+  await expect(page.getByText(/Saved on this device/i)).not.toBeVisible();
+  // Must show the error message
+  await expect(page.getByRole("alert")).toBeVisible();
+  // Form input must still be present (not cleared)
+  await expect(page.getByLabel("Title")).toHaveValue("Storage quota test");
+});
+
+test("two composers on same page save independently without overwriting each other", async ({ page }) => {
+  await page.goto("/instructors/prof-mueller");
+  await page.evaluate(() => localStorage.removeItem("student-rankz-pending-reviews"));
+
+  // Save via the first composer (header area)
+  const buttons = page.getByRole("button", { name: /Write a review/i });
+  await buttons.first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: /4 stars/i }).click();
+  await page.getByLabel("Title").fill("Review from composer one");
+  await page.locator("#review-body").fill("First composer saves this draft to localStorage on the device.");
+  await page.getByRole("button", { name: /Save draft/i }).click();
+  await expect(page.getByText(/Saved on this device/i)).toBeVisible();
+  await page.getByRole("button", { name: /Close/i }).first().click();
+
+  // Save via the second composer (below reviews section)
+  await buttons.last().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: /5 stars/i }).click();
+  await page.getByLabel("Title").fill("Review from composer two");
+  await page.locator("#review-body").fill("Second composer appends without overwriting the first draft in storage.");
+  await page.getByRole("button", { name: /Save draft/i }).click();
+  await expect(page.getByText(/Saved on this device/i)).toBeVisible();
+  await page.getByRole("button", { name: /Close/i }).first().click();
+
+  // Both drafts must be in localStorage
+  const stored = await page.evaluate(() => localStorage.getItem("student-rankz-pending-reviews"));
+  expect(stored).toBeTruthy();
+  const reviews = JSON.parse(stored!);
+  expect(reviews).toHaveLength(2);
+  expect(reviews[0].title).toBe("Review from composer one");
+  expect(reviews[1].title).toBe("Review from composer two");
+});
+
 // ─── Review composer ─────────────────────────────────────────────────────────
 
 test("review form validates empty submission", async ({ page }, info) => {

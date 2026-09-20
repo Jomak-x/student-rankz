@@ -24,7 +24,7 @@ npm run dev      # http://localhost:3000
 | `npm run start` | Serve production build at http://localhost:3000 |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript (`tsc --noEmit`) |
-| `npm test` | Playwright smoke suite (builds + serves on port 3001) |
+| `npm test` | Playwright smoke suite (requires prior `npm run build`; serves on port 3001) |
 
 ## Pages
 

@@ -92,7 +92,7 @@ Courses and instructors are associated with TUM and Bologna. All scores, review 
 | localStorage key | Written by | Read by | Cleared by |
 |---|---|---|---|
 | `student-rankz-compare` | `use-compare.ts` (CompareToggle) | `compare/page.tsx`, CompareToggle | "Remove" button on compare page |
-| `student-rankz-pending-reviews` | `review-composer.tsx` (Save Draft) | `review-composer.tsx` (draft restore) | Not cleared by the UI |
+| `student-rankz-pending-reviews` | `review-composer.tsx` (Save Draft) | Not read back by the UI — storage only | Not cleared by the UI |
 | `theme` | `next-themes` | `next-themes` | Theme picker (System resets) |
 
 **Hydration guard**: `use-local-storage` returns `hydrated: false` on first render (SSR/server pass) and reads from `window.localStorage` only inside a `useEffect`. Components dependent on stored state should check `hydrated` before rendering compare-count badges or draft restore to avoid hydration mismatch.
@@ -126,9 +126,10 @@ The `base-nova` style uses `@base-ui/react` primitives, **not Radix UI**. Key di
 | `npm run start` | Serve production build at `http://localhost:3000` |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Playwright smoke suite (builds first with `npm run build`, then serves on port 3001) |
+| `npm run build && npm test` | Build then run the full Playwright smoke suite |
+| `npm test` | Run Playwright smoke suite (requires a prior `npm run build`) |
 
-`npm test` starts a **fresh production server** (`reuseExistingServer: false`, port 3001) so tests always run against the current build.
+`npm test` starts a **fresh production server** (`reuseExistingServer: false`, port 3001). Always run `npm run build` first — `npm test` alone does not trigger a build.
 
 ## Screenshot workflow
 
