@@ -28,7 +28,7 @@ export function RankingsList({ items, compact = false }: RankingsListProps) {
               className={cn(
                 "shrink-0 w-7 sm:w-8 text-right font-semibold tabular-nums leading-none",
                 compact ? "text-base" : "text-lg sm:text-xl",
-                rank <= 3 ? "text-primary" : "text-foreground/35"
+                rank <= 3 ? "text-primary" : "text-muted-foreground"
               )}
             >
               {rank}
