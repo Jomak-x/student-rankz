@@ -6,10 +6,13 @@ import Link from "next/link";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { UniversityCard } from "@/components/university-card";
+import { RankingsList } from "@/components/rankings-list";
 import { universities } from "@/lib/demo-data";
+import { rankUniversities } from "@/lib/rankings";
 import { useRouter } from "next/navigation";
 
 const featured = universities.slice(0, 6);
+const topThree = rankUniversities(universities, 3);
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -67,6 +70,23 @@ export default function HomePage() {
               <UniversityCard key={uni.id} university={uni} />
             ))}
           </div>
+        </div>
+      </section>
+      {/* Rankings preview — compact editorial rows */}
+      <section className="border-t border-border px-4 sm:px-6 py-6">
+        <div className="mx-auto max-w-5xl">
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
+              Top by student experience
+            </h2>
+            <Link
+              href="/rankings"
+              className="text-sm text-primary hover:underline flex items-center gap-1"
+            >
+              All rankings <ArrowRight className="size-3" />
+            </Link>
+          </div>
+          <RankingsList items={topThree} compact />
         </div>
       </section>
     </div>

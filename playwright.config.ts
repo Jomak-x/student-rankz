@@ -1,5 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Port 3001 by default. Set PLAYWRIGHT_PORT to run the suite in a separate
+// worktree without clashing with another local server, e.g.:
+//   PLAYWRIGHT_PORT=3113 npx playwright test
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 3001);
+const baseURL = `http://localhost:${port}`;
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -8,7 +14,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL,
     trace: "retain-on-failure",
   },
   projects: [
@@ -22,8 +28,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run start -- --port 3001",
-    url: "http://localhost:3001",
+    command: `npm run start -- --port ${port}`,
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 120 * 1000,
   },
