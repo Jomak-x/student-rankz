@@ -40,9 +40,11 @@ lib/
   utils.ts                  cn() utility (clsx + tailwind-merge)
 
 tests/
-  smoke.spec.ts             Playwright smoke suite (38 test cases, 19 per project)
+  smoke.spec.ts             Playwright smoke suite (navigation, search, details, compare, reviews, theme, overflow)
+  rankings.spec.ts          Rankings suite (sort order, top-N cap, empty state, nav, home preview, overflow)
 
-playwright.config.ts        2 projects: desktop (Desktop Chrome) + mobile (Pixel 5, Chromium)
+playwright.config.ts        2 projects: desktop (Desktop Chrome) + mobile (Pixel 5, Chromium);
+                            port 3001 by default, override for parallel runs with PLAYWRIGHT_PORT
 ```
 
 ## Routes
