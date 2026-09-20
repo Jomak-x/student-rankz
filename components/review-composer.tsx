@@ -64,6 +64,7 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
     };
     const ok = setPending((prev) => [...(Array.isArray(prev) ? prev : []), review]);
     if (ok) {
+      setSaveError("");
       setSaved(true);
     } else {
       setSaveError("Could not save — browser storage may be full or blocked.");
@@ -117,6 +118,7 @@ export function ReviewComposer({ targetType, targetId, targetName }: ReviewCompo
                 size="sm"
                 onClick={() => {
                   setSaved(false);
+                  setSaveError("");
                   setRating(0);
                   setTitle("");
                   setBody("");
