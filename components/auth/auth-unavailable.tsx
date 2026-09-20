@@ -15,8 +15,7 @@ export function AuthUnavailable() {
           Account access is temporarily unavailable
         </p>
         <p className="leading-relaxed text-muted-foreground">
-          Authentication is not configured or could not be reached. You can
-          still browse all public demo pages and try again later.
+          Please try again later. You can still browse universities and rankings.
         </p>
       </div>
     </div>

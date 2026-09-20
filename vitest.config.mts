@@ -9,5 +9,7 @@ export default defineConfig({
     clearMocks: true,
     restoreMocks: true,
     setupFiles: ["./tests/auth/setup.ts"],
+    // Transform the SDK so its Next request APIs can be mocked in transport tests.
+    server: { deps: { inline: ["@neondatabase/auth"] } },
   },
 });

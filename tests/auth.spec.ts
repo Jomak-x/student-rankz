@@ -39,3 +39,44 @@ test("account fails closed and provider endpoints are uncached 503 without confi
     expect(response.headers()["set-cookie"]).toBeUndefined();
   }
 });
+
+test("main navigation connects rankings to the unavailable account", async ({ page }, info) => {
+  await page.goto("/rankings");
+  if (info.project.name === "mobile") {
+    await page.getByRole("button", { name: "Open navigation menu" }).click();
+  }
+  const navigation = page.getByRole("navigation", {
+    name: info.project.name === "mobile" ? "Mobile navigation" : "Main navigation",
+  });
+  await expect(navigation.getByRole("link", { name: "Rankings", exact: true })).toBeVisible();
+  await mkdir(`test-screenshots/${info.project.name}`, { recursive: true });
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/integration-navigation-light.png`, fullPage: true });
+  await navigation.getByRole("link", { name: "Account", exact: true }).click();
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(page.getByRole("status")).toContainText("Account access is temporarily unavailable");
+  await expect(page.getByRole("status")).toContainText("You can still browse universities and rankings.");
+  if (info.project.name === "mobile") {
+    await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toHaveCount(0);
+  }
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/integration-account-light.png`, fullPage: true });
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await page.getByRole("menuitem", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/integration-account-dark.png`, fullPage: true });
+  await page.goto("/rankings");
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/integration-rankings-dark.png`, fullPage: true });
+});
+
+test("account navigation fits intermediate screen widths", async ({ page }) => {
+  for (const width of [640, 768, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/rankings");
+    if (width < 768) {
+      await page.getByRole("button", { name: "Open navigation menu" }).click();
+    }
+    await expect(page.getByRole("link", { name: "Account", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});

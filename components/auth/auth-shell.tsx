@@ -50,9 +50,9 @@ export function AuthShell({
         </Card>
 
         <p className="text-center text-xs leading-relaxed text-muted-foreground">
-          Signing in establishes your account identity. University affiliation
-          and student status require a separate verification step that is not
-          available yet.
+          Signing in does not verify university affiliation or student status.
+          University email verification is coming later and will confirm mailbox
+          access only.
         </p>
       </div>
     </div>

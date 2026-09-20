@@ -1,160 +1,80 @@
-# Frontend — Technical Reference
+# Frontend technical reference
 
-Next.js 16.3.5 App Router prototype for EU university, course, and instructor experience reviews. All data is demo sample data.
+The frontend is a Next.js 16.3.5 App Router prototype. The public catalog remains a fixture demo while database reads are integrated separately. Managed auth has its own routes and server session helper; it is unavailable until the provider environment is configured.
 
 ## Directory map
 
-```
-app/                        Next.js App Router pages and layout
-  layout.tsx                Root layout: ThemeProvider, DemoBanner, Header, Toaster
-  globals.css               Tailwind v4 import, oklch colour tokens, font variables, base-ui overlay fix
-  page.tsx                  Home: search form + 6-card university grid
-  universities/
-    page.tsx                Filterable/sortable university list
-    [id]/page.tsx           University detail: scores, tabs (Overview / Reviews), review composer
-  courses/
-    page.tsx                Course list with level filter
-    [id]/page.tsx           Course detail: scores, instructor tab
-  instructors/
-    [id]/page.tsx           Instructor detail: scores, affiliated courses, reviews
-  compare/page.tsx          Side-by-side comparison table (up to 3 universities)
-
-components/
-  ui/                       shadcn base-nova components (base-ui primitives, NOT Radix)
-  demo-banner.tsx           Compact dismissible "Demo · sample data" bar
-  header.tsx                Nav + mobile hamburger + theme toggle
-  review-composer.tsx       Dialog form: star rating, title, body → localStorage only
-  compare-toggle.tsx        "Add to comparison" button (reads/writes compare store)
-  review-card.tsx           Renders a single fixture review
-  score-bar.tsx             Labelled horizontal progress bar for category scores
-  star-rating.tsx           Interactive 1–5 star picker
-  university-card.tsx       Card used on home and /universities list
-  theme-provider.tsx        Re-exports next-themes ThemeProvider
-
-hooks/
-  use-local-storage.ts      SSR-safe localStorage hook; returns [value, setter, hydrated]
-  use-compare.ts            Compare store (wraps use-local-storage, key student-rankz-compare)
-
-lib/
-  demo-data.ts              All fixture data + TypeScript types
-  utils.ts                  cn() utility (clsx + tailwind-merge)
-
-tests/
-  smoke.spec.ts             Playwright smoke suite (navigation, search, details, compare, reviews, theme, overflow)
-  rankings.spec.ts          Rankings suite (sort order, top-N cap, empty state, nav, home preview, overflow)
-
-playwright.config.ts        2 projects: desktop (Desktop Chrome) + mobile (Pixel 5, Chromium);
-                            port 3001 by default, override for parallel runs with PLAYWRIGHT_PORT
+```text
+app/                        App Router pages and layout
+  sign-in/, sign-up/        Managed-auth forms
+  account/                  Server-verified account view
+  api/auth/[...path]/       Same-origin managed-auth proxy
+  rankings/                 Fixture-backed rankings page
+  universities/, courses/,
+  instructors/, compare/   Public fixture-backed catalog routes
+components/                 UI and feature components
+  auth/                     Auth forms, shell, unavailable state, sign-out
+  review-composer.tsx       Local-only review draft form
+hooks/                      SSR-safe localStorage and compare state
+lib/demo-data.ts             Public fixture data and types
+lib/auth/                    Client/server auth adapters and session boundary
+server/db.ts                 Lazy server-only Neon database access
+db/                          Drizzle schema, migration config, and synthetic seed
+tests/                       Playwright, auth, and database tests
 ```
 
-## Routes
+## Runtime boundary
 
-| Route | Static params source | Notes |
-|---|---|---|
-| `/` | — | Home page |
-| `/universities` | — | `?q=` pre-fills search from home |
-| `/universities/[id]` | `generateStaticParams` over `universities` | |
-| `/courses` | — | |
-| `/courses/[id]` | `generateStaticParams` over `courses` | |
-| `/instructors/[id]` | `generateStaticParams` over `instructors` | |
-| `/compare` | — | Client component, localStorage-driven |
+The public routes currently import fixture data. They do not silently fall back from a database failure because they do not query the database yet. The pending catalog integration owns server-side reads, controlled search/pagination, and distinct missing-config, empty-database, outage, and explicitly selected demo states. Do not document or build an interface for that work until its owner lands it.
 
-All pages are statically generated at build time (`output: "export"` not set; uses default Node server).
+The review composer saves to `student-rankz-pending-reviews` in `localStorage`. These drafts are private to the browser, are not read back into the public UI, and do not alter scores or review counts. Server-side private drafts require the auth and application-identity work described in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-## Demo fixture data (`lib/demo-data.ts`)
+The compare list uses `student-rankz-compare`; the theme uses `theme`. The SSR-safe local-storage hook reads browser state only after hydration.
 
-### Types
+## Fixture model and routes
 
-```ts
-University  { id, name, city, country, countryCode, founded, type,
-              website, description, studentCount, scores{…7}, reviewCount, tags }
-Course      { id, universityId, code, name, department, credits, level,
-              semester, instructorIds, scores{…5}, reviewCount, tags, description }
-Instructor  { id, universityId, name, role, department, courses,
-              scores{overall,clarity,support,expertise,engagement}, reviewCount }
-Review      { id, targetId, targetType, author, date, rating, title, body, helpful }
-```
+The fixture model contains `University`, `Course`, `Instructor`, `Review`, and `PendingReview` values. Universities carry identity, location, description, student count, category scores, tags, and a sample review count. Courses belong to a university and carry code, credits, level, term, instructor IDs, scores, tags, and a sample review count. Instructors belong to a university and carry role, department, course IDs, scores, and a sample review count. Fixture review bodies and aliases are illustrative and are not published records.
 
-### Fixture universities (7, all EU)
+The route behavior is:
 
-| id | Name | Country |
-|---|---|---|
-| `tum` | Technical University of Munich | Germany |
-| `unibo` | University of Bologna | Italy |
-| `kth` | KTH Royal Institute of Technology | Sweden |
-| `sorbonne` | Sorbonne University | France |
-| `maastricht` | Maastricht University | Netherlands |
-| `uhelsinki` | University of Helsinki | Finland |
-| `lmu` | LMU Munich | Germany |
-
-Courses and instructors are associated with TUM and Bologna. All scores, review counts, and review bodies are illustrative sample values — not real published data.
-
-## Browser persistence
-
-| localStorage key | Written by | Read by | Cleared by |
-|---|---|---|---|
-| `student-rankz-compare` | `use-compare.ts` (CompareToggle) | `compare/page.tsx`, CompareToggle | "Remove" button on compare page |
-| `student-rankz-pending-reviews` | `review-composer.tsx` (Save Draft) | Not read back by the UI — storage only | Not cleared by the UI |
-| `theme` | `next-themes` | `next-themes` | Theme picker (System resets) |
-
-**Hydration guard**: `use-local-storage` returns `hydrated: false` on first render (SSR/server pass) and reads from `window.localStorage` only inside a `useEffect`. Components dependent on stored state should check `hydrated` before rendering compare-count badges or draft restore to avoid hydration mismatch.
-
-Saved reviews are never sent to any server. They do not affect displayed review counts or overall scores.
-
-## Theme
-
-- Provider: `next-themes` with `attribute="class"` — adds `class="dark"` to `<html>`.
-- Tokens: defined as CSS custom properties on `:root` / `.dark` in `app/globals.css`.
-- Accent: `--primary: oklch(0.65 0.22 52)` (orange, light) / `oklch(0.72 0.20 52)` (dark).
-- Font: `--font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif)` — Geist Sans loaded via `next/font/google` in `app/layout.tsx`, falls back to system sans.
-
-## shadcn / base-ui notes
-
-The `base-nova` style uses `@base-ui/react` primitives, **not Radix UI**. Key differences:
-
-- No `asChild` prop — use `render` prop instead: `<DialogTrigger render={<Button />} />`
-- `Select.onValueChange` returns `string | null` (not `string`) — always null-coalesce: `(v) => setState(v ?? "all")`
-- `Dialog.Backdrop` renders as a `position:fixed; inset:0` div with `data-base-ui-inert` **before** the dialog popup in the portal. Without explicit z-index it falls below `z-50` but can intercept pointer events in headless browsers. Fixed via:
-  - Dialog overlay: `z-[55]`, popup: `z-[60]` (in `components/ui/dialog.tsx`)
-  - `[data-base-ui-inert] { pointer-events: none }` (in `app/globals.css`)
-
-## npm commands
-
-| Command | What it does |
+| Route | Behavior |
 |---|---|
-| `npm ci` | Install exact versions from `package-lock.json` |
-| `npm run dev` | Next.js dev server at `http://localhost:3000` |
-| `npm run build` | Production build (static generation of all routes) |
-| `npm run start` | Serve production build at `http://localhost:3000` |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run build && npm test` | Build then run the full Playwright smoke suite |
-| `npm test` | Run Playwright smoke suite (requires a prior `npm run build`) |
+| `/` | Search entry point and featured fixture universities |
+| `/universities` | Fixture list with country filter and sort |
+| `/universities/[id]` | Fixture detail, scores, tabs, and local review composer |
+| `/courses`, `/courses/[id]` | Fixture course list and detail |
+| `/instructors/[id]` | Fixture instructor detail and reviews |
+| `/rankings` | Deterministic fixture ordering by score, sample review count, then name |
+| `/compare` | Up to three fixture universities from browser storage |
 
-`npm test` starts a **fresh production server** (`reuseExistingServer: false`, port 3001). Always run `npm run build` first — `npm test` alone does not trigger a build.
+Dynamic fixture routes obtain static params from `lib/demo-data.ts`; they are not database slugs or a server data contract.
 
-## Screenshot workflow
+## Auth navigation
 
-Test screenshots land in `test-screenshots/<project>/` (gitignored). Two projects:
+Account is available from the shared desktop and mobile navigation. The account page displays only a provider-verified identity. Missing or invalid auth configuration produces a short unavailable state. See [AUTH.md](./AUTH.md) for the pinned SDK, `getVerifiedSession()` boundary, cookie-cache limitation, and configured-provider release gates.
 
-- `desktop/` — Desktop Chrome viewport
-- `mobile/` — Pixel 5, Chromium
+## UI conventions
 
-Committed review assets live in `.github/previews/frontend-mvp/` and are embedded in PR descriptions. Regenerate them after any visual change:
+- `@base-ui/react` primitives back the base-nova components; they are not Radix components.
+- `Select.onValueChange` can return `null`; callers coalesce it before setting state.
+- Dialog backdrop and popup z-index rules are defined in `components/ui/dialog.tsx` and `app/globals.css`.
+- Light, dark, and system themes use `next-themes` and the CSS tokens in `app/globals.css`.
+
+The `base-nova` components use `@base-ui/react`. They do not support Radix's `asChild`; use the component's `render` prop where needed. Dialog overlays use explicit z-indexes and disable pointer events on the base-ui inert backdrop so headless browser clicks reach the popup.
+
+## Verification
 
 ```bash
-npm test
-cp test-screenshots/desktop/01-home-light.png .github/previews/frontend-mvp/home-light.png
-# … repeat for home-dark, university-detail, review-dialog
-cp test-screenshots/mobile/07-home-mobile.png .github/previews/frontend-mvp/home-mobile.png
+npm run lint
+npm run typecheck
+npm run test:auth
+npm run build
+npm test                         # default Playwright port 3001
+PLAYWRIGHT_PORT=3127 npm test   # integration worktree port
 ```
 
-Keep committed previews ≤ 500 KB each.
+The integration worktree uses 3127 for browser checks to avoid the other reserved local ports (3001, 3107, and 3113). Playwright starts a fresh production server; run `npm run build` first.
 
-## Known prototype limits
+Screenshots used for frontend review belong under `.github/previews/<branch-slug>/`, are limited to 500 KB each, and must describe demo behavior accurately. No screenshot establishes live database, auth, email, or deployment behavior.
 
-- No backend, no auth, no environment variables required.
-- Review drafts saved to `localStorage` only — never published or counted.
-- Compare is capped at 3 universities by the UI; no API enforces this.
-- All fixture scores and review counts are sample values, not real data.
-- `docs/ARCHITECTURE.md` and `docs/BACKEND-SETUP.md` are owned by the backend worker and arrive in a separate PR.
+The Playwright projects are desktop Chromium and a Pixel 5 mobile Chromium viewport. To refresh local screenshots after a visual change, run the build and browser suite, then copy selected files from `test-screenshots/desktop/` or `test-screenshots/mobile/` into the branch preview directory. Keep preview assets small and describe them as demo states.

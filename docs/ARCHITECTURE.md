@@ -1,66 +1,45 @@
-# Student Rankz — Architecture
+# Student Rankz architecture
 
-**Purpose:** orient engineers and coding agents on what this repository implements today versus the planned backend integration. Not a specification; no SQL or API described here is live. Provisioning steps: [BACKEND-SETUP.md](./BACKEND-SETUP.md). Frontend conventions: [FRONTEND.md](./FRONTEND.md) — that file arrives in its own PR, so this link resolves only after both are merged.
+This document records the current boundary between the public demo and the backend slices. It is an implementation map, not a promise that every planned flow exists.
 
-## Frontend prototype (separate PR)
+## Current components
 
-This describes the frontend PR; it is not yet merged into the default branch.
+The Next.js app serves public fixture-backed catalog pages and a fixture-backed rankings page. The review composer stores drafts in browser `localStorage`. These paths remain independent of the database.
 
-- Next.js 16.3.5 (App Router) with React 19, Tailwind CSS 4 and shadcn-based components.
-- Routes: `/`, `/universities`, `/universities/[id]`, `/courses`, `/courses/[id]`, `/instructors/[id]`, `/compare`.
-- In-repo demo fixtures (`lib/demo-data.ts`) for universities, courses and instructors; search and filters run client-side over them.
-- Browser-only state in `localStorage` (via `hooks/use-local-storage.ts`): the compare list and private draft reviews.
-- **No backend exists yet:** no database, no accounts or login, no email verification, no moderation, no server-side persistence. Fixtures are illustrative, not real institutions' current data.
+The database slice provides a typed PostgreSQL directory schema, committed Drizzle migration, server-only lazy access through `server/db.ts`, and a repeatable synthetic seed. The seed contains fictional universities, programmes, courses, offerings, and instructors. It is explicitly invoked for a named development or demo scope and is never run by build, migration, or deploy.
 
-## Planned backend (not implemented)
+The auth slice provides managed Neon Auth routes, sign-in/sign-up/account UI, a same-origin auth proxy, and `getVerifiedSession()` in `lib/auth/server.ts`. It is independently configured from the application database. A provider user is not yet an application identity and does not automatically receive affiliation, ownership, or publication rights. Read [AUTH.md](./AUTH.md) for the exact SDK and session boundary.
 
-- **Database:** one Neon Postgres app database, EU region (Frankfurt). Private tables hold identity, affiliations and review ownership; public pages read explicit, privacy-safe projections only.
-- **Authentication:** provisional choice Neon Auth (managed authentication built on Better Auth), pending day-1 checks; fallback is self-hosted Better Auth against the same database. Login (personal email) stays separate from affiliation.
-- **Affiliation verification:** an independent layer — per-university approved exact email domains, single-use account-bound codes with expiry. Proves mailbox control only, never enrollment, attendance or one person per mailbox.
-- **Reviews:** immutable revisions; each admission writes the revision and its moderation job in one transaction (transactional outbox).
-- **Moderation (deferred until a gateway is available):** planned local lexical checks, then a cheap gateway model, escalating uncertain/serious cases to a stronger model. Public submission/publication stays disabled until this pipeline is implemented. Fail-closed on timeout, malformed output or outage; publication is idempotent and re-checks deletion and eligibility; deletion wins over in-flight jobs.
-- **Directory model:** programme-specific course status (required/elective belongs to the programme–course relation), dated offerings, and multiple instructors per offering.
-- **Jobs:** an authenticated scheduled worker; all secrets server-side only.
+## Pending integration boundaries
 
-## System shape
+Catalog and database reads, controlled search/pagination, and honest missing-config/empty/outage/demo states are owned by a later worker. The current public UI must not be described as database-backed.
+
+University affiliation, application identity mapping, private server-side drafts, and their authorization rules are also pending. Do not invent routes or SQL interfaces for those features in dependent documentation. Public posting, moderation, publication, live score aggregation, reports, and admin controls remain deferred.
 
 ```mermaid
 flowchart TB
-  subgraph Now["Frontend PR — demo, browser only"]
-    B[Browser] --> P["Next.js pages + client-side filters"]
-    P --> FIX[("lib/demo-data.ts fixtures")]
-    P --> LS[("localStorage: compare list, draft reviews")]
-  end
-  subgraph Planned["Planned backend — not implemented"]
-    U[User] --> App[Next.js server routes]
-    App --> Auth[Auth provider]
-    App --> Mail[Verification email]
-    App --> DB[("Neon: private identity + revisions + outbox")]
-    DB --> W[Authenticated worker]
-    W --> L[Lexical checks] --> M["Deferred gateway: cheap then stronger model"]
-    W --> G["Publish gate: fail-closed, idempotent"]
-    G --> Proj[Public projections] --> App
-  end
+  B[Browser] --> UI[Next.js public UI]
+  UI --> F[(Fixture data)]
+  UI --> LS[(localStorage drafts and compare list)]
+  B --> AUI[Auth pages and account]
+  AUI --> AP[Same-origin auth proxy]
+  AP --> AUTH[Managed auth provider]
+  DBTEST[Migration and seed tooling] --> DB[(PostgreSQL directory)]
+  DBREAD[Pending server catalog reads] -. future integration .-> DB
 ```
 
-The halves are intentionally disconnected: browser state never feeds the future server flow without full re-validation through the submission path.
+The fixture and browser paths do not feed server records. A future server write must revalidate identity, ownership, target IDs, and privacy at its own boundary. Private drafts require login; university-restricted operations additionally check affiliation. Public publication remains disabled until moderation exists.
 
-## Trust boundaries
+## Data and trust rules
 
-- `localStorage` content is non-authoritative; a draft becomes a server review only through normal submission and moderation.
-- Public routes, payloads, errors and logs must not expose identity, emails, HMACs, or pending/rejected text.
-- Moderation and publication run server-side; the client cannot bypass or pre-approve them.
-- Verification codes are single-use, account-bound and short-lived; passing verification never grants login or account recovery, and one university's affiliation never authorizes another university's reviews.
-- Model verdicts are advisory; anything unverified or errored stays unpublished.
-- Identity data lives in private tables; public projections carry opaque references only.
+- Public responses must never expose provider credentials, session material, private account identity, draft ownership, verification codes, or unpublished text.
+- Public anonymity is separate from operator-held account identity.
+- Authentication alone is not authorization for another user's resource or a university-restricted action.
+- Production must not receive synthetic rows. A demo branch may receive only the explicit fictional seed.
+- A Neon branch copies existing auth identities and configuration from its parent. Development, preview, and test branches must derive from synthetic parents, never from production identities.
 
-## Gap list (what needs implementing)
+## Integration order
 
-1. Database schema, migrations, and a server data layer replacing fixtures.
-2. Authentication integration and session handling.
-3. Affiliation verification: domain allowlist, code issue/verify, expiry.
-4. Review submission with immutable revisions, outbox worker and publish gate.
-5. Privacy-safe public projections, with tests for each boundary above.
-6. Reports/appeals and restricted administrative controls before public launch. No hired moderation team is required for the prototype.
+The database foundation and auth source changes are preserved as independent commits before the final wiring. The source checkpoints are database `e26e7ad4868683e9eaa4b83ea9eb194cc2acf31b`, auth `5fb5bc2c069f8a50ec453ac02885170dc993dcda`, and UI `d05e80a6a88e2e0fb489bb13c3a65639f99d849e`. The user merges source PRs first. After those land, reconcile the integration work against the updated `main` with a normal merge where permitted or a fresh final glue branch, avoiding duplicate squashed cherry-picks. Agents do not merge, force-push, or deploy.
 
-Keep the initial deployment small: one Neon project, synthetic development data, and temporary preview branches only when needed. See the setup guide for free-plan eligibility. Student-experience ratings describe voluntary feedback; they are not accreditation or objective academic rankings. Public anonymity does not mean the operator cannot associate reviews with private accounts.
+See [BACKEND-SETUP.md](./BACKEND-SETUP.md) for local configuration and [INTEGRATION.md](./INTEGRATION.md) for the final checkpoint and release gates.

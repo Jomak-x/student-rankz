@@ -1,6 +1,6 @@
 # Managed authentication
 
-This integration adds `/sign-in`, `/sign-up`, `/account`, and `/api/auth/[...path]` independently of the application database. The public demo works with no credentials. Main navigation integration is separate; open the auth URLs directly. Authentication identifies a provider user; it never grants university affiliation, enrollment, review permissions, or publication rights. Personal email addresses are allowed.
+This integration adds `/sign-in`, `/sign-up`, `/account`, and `/api/auth/[...path]` independently of the application database. The public demo works with no credentials. The shared navigation links to Account on desktop and mobile. Authentication identifies a provider user; it never grants university affiliation, enrollment, review permissions, or publication rights. Personal email addresses are allowed.
 
 ## Version and configuration
 
@@ -39,7 +39,11 @@ Auth pages, account, and API handlers are dynamic. API responses use `Cache-Cont
 
 The exported `getVerifiedSession(): Promise<VerifiedSession>` interface is stable for integration: `{ status: "authenticated", user: { id, name, email } }`, `{ status: "anonymous" }`, or `{ status: "unavailable" }`. Callers must independently enforce resource ownership, affiliation, and all resource permissions; an authenticated result alone never authorizes access to another user’s drafts or university-restricted operations. Deny access for both non-authenticated states.
 
-The SDK's signed HTTP-only session-data cookie has an explicit **300-second TTL**. `no-store` prevents HTTP response caching, but does **not** remove that signed session cache. Logout clears cookies via the SDK; remote revocation or session changes may remain unseen until cache expiry. This is not immediate revocation. No sensitive writes are enabled here. Future account deletion, affiliation, or posting endpoints must enforce provider-fresh session validity using an API verified against the installed SDK/service, and independently authorize each operation. Do not reuse this cached display helper as proof of immediate revocation.
+The SDK's signed HTTP-only session-data cookie has an explicit **300-second TTL**. `no-store` prevents HTTP response caching, but does **not** remove that signed session cache. Logout clears cookies via the SDK; remote revocation or session changes may remain unseen until cache expiry. This is not immediate revocation. Do not reuse this cached display helper as proof of immediate revocation.
+
+`getVerifiedWriteSession(): Promise<VerifiedSession>` is the separate write boundary. It calls the installed SDK's `getSession({ query: { disableCookieCache: "true" } })`, bypassing the local signed-cookie cache and forwarding `disableCookieCache=true` to the provider. **The string value is intentional:** version `0.5.0-beta` compares against the exact string `"true"`; passing boolean `true` leaves its local cache active. Better Auth documents this query as forcing a server-side session lookup ([session caching](https://better-auth.com/docs/concepts/session-management#session-caching)). The write helper validates the same minimal identity, subject match, and expiry as the read helper. Missing configuration, malformed/expired sessions, revoked sessions returned as null, and provider failures all deny access; it never falls back to cached identity.
+
+Call this boundary in a dynamic Route Handler or Server Action immediately before a sensitive operation. The SDK may refresh response cookies, which Next.js cannot do during Server Component rendering. Each caller must still enforce ownership, affiliation, operation permissions, and request/CSRF protections. Fresh provider validation does not mean recent password entry, does not authorize a write by itself, and cannot prevent a concurrent revocation after validation. This helper adds no feature endpoint. Live hosted revocation and branch isolation must still be exercised before production use.
 
 ## Managed schema and branch isolation
 
@@ -57,10 +61,10 @@ npm run lint
 npm run typecheck
 npm run test:auth
 npm run build
-PLAYWRIGHT_PORT=3107 npm test
+PLAYWRIGHT_PORT=3127 npm test
 ```
 
-Vitest tests use installed SDK types and mock its provider boundary; unexpected fetches fail. React tests cover validation, provider/network errors, pending states, navigation and sign-out. Playwright runs the full existing smoke suite plus unavailable auth states against a fresh production server with auth env values blanked, on an isolated port. There is no application test-session flag or production-accessible bypass. CI runs auth tests without secrets before building and running browser tests.
+Vitest tests use installed SDK types and mock its provider boundary; unexpected fetches fail. `tests/auth/fresh-session.test.ts` also exercises the actual installed SDK with a signed synthetic cache cookie, mocked Next request context, and mocked provider transport. It demonstrates that reads can use the local cache while each write check reaches the provider with `disableCookieCache=true`, and that a cached identity cannot override a provider rejection or outage. These are offline transport-contract tests, **not live-provider proof**. React tests cover validation, provider/network errors, pending states, navigation and sign-out. Playwright runs the full existing smoke suite plus unavailable auth states against a fresh production server with auth env values blanked, on an isolated port. There is no application test-session flag or production-accessible bypass. CI runs auth tests without secrets before building and running browser tests.
 
 Offline tests and screenshots do **not** establish live cookie issuance/security, mail delivery, verification policy, hosted password reset, expiry/remote revocation, CSRF/trusted-origin enforcement, or branch isolation. These are explicit configured-service release gates. This integration is not claimed production-ready until those gates are exercised with synthetic accounts and reviewed.
 

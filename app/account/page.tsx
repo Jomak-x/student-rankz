@@ -39,7 +39,7 @@ export default async function AccountPage() {
       <div className="mb-6 space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Your account</h1>
         <p className="text-sm text-muted-foreground">
-          Your identity is managed securely by Neon Auth.
+          Manage your sign-in details.
         </p>
       </div>
 

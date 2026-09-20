@@ -38,11 +38,29 @@ function nonemptyString(value: unknown): value is string {
  * Callers must independently enforce resource ownership, affiliation, and permissions.
  */
 export async function getVerifiedSession(): Promise<VerifiedSession> {
+  return verifySession(false);
+}
+
+/**
+ * Revalidate with the provider before a write; never fall back to cached identity.
+ * Use in a Route Handler or Server Action so the SDK can refresh response cookies.
+ * Callers must still enforce ownership, affiliation, and operation permissions.
+ */
+export async function getVerifiedWriteSession(): Promise<VerifiedSession> {
+  return verifySession(true);
+}
+
+async function verifySession(providerFresh: boolean): Promise<VerifiedSession> {
   const auth = getAuth();
   if (!auth) return { status: "unavailable" };
 
   try {
-    const { data, error } = await auth.getSession();
+    // 0.5.0-beta checks the string "true" to skip its local signed-cookie cache,
+    // then forwards the same query to the provider to bypass its cookie cache.
+    // Boolean true does not bypass the local cache. Keep the SDK regression test.
+    const { data, error } = providerFresh
+      ? await auth.getSession({ query: { disableCookieCache: "true" } })
+      : await auth.getSession();
     if (error) return { status: "unavailable" };
     if (!data) return { status: "anonymous" };
 

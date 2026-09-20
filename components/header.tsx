@@ -19,6 +19,7 @@ const navLinks = [
   { href: "/rankings", label: "Rankings" },
   { href: "/courses", label: "Courses" },
   { href: "/compare", label: "Compare" },
+  { href: "/account", label: "Account" },
 ];
 
 export function Header() {
@@ -44,13 +45,13 @@ export function Header() {
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden sm:flex items-center gap-1" aria-label="Main navigation">
+          <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
             {navLinks.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
                 className={cn(
-                  "px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                  "px-2 py-1.5 rounded-md text-sm font-medium transition-colors",
                   pathname === href || pathname.startsWith(href + "/")
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -83,7 +84,7 @@ export function Header() {
             <Button
               variant="ghost"
               size="icon"
-              className="sm:hidden size-8"
+              className="md:hidden size-8"
               aria-label="Open navigation menu"
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen((o) => !o)}
@@ -96,7 +97,7 @@ export function Header() {
         {/* Mobile nav */}
         {mobileOpen && (
           <nav
-            className="sm:hidden border-t border-border py-3 flex flex-col gap-1"
+            className="md:hidden border-t border-border py-3 flex flex-col gap-1"
             aria-label="Mobile navigation"
           >
             {navLinks.map(({ href, label }) => (

@@ -1,91 +1,46 @@
-# Repository Workflow
+# Repository workflow
 
-## Workflows
+## CI workflows
 
-### `CI` (`.github/workflows/ci.yml`)
+Frontend CI (`.github/workflows/ci.yml`) runs `npm ci`, lint, typecheck, offline auth tests, build, and Playwright. Playwright starts a fresh production server on port 3001 unless `PLAYWRIGHT_PORT` is supplied. The integration worktree uses 3127; 3107 and 3113 are reserved for other parallel worktrees.
 
-**Triggers**: every `pull_request` event; every push to `main`.
+Backend CI (`.github/workflows/backend.yml`) is separate. It starts PostgreSQL with a random mapped host port, runs `npm run test:db`, applies committed migrations with Drizzle, and verifies that the seed CLI refuses an unconfirmed invocation. It does not provision a Neon project or seed a hosted environment.
 
-**Concurrency**: one run per ref. A new push cancels any still-running job for the same branch or PR.
+Both workflows use read-only repository permissions and do not deploy. Playwright failure traces and screenshots are uploaded as failure artifacts.
 
-**Permissions**: `contents: read` only — no write access, no secrets, no deployment.
-
-**Steps in order**:
-
-| Step | Command | Fails fast |
-|---|---|---|
-| Install | `npm ci` | yes |
-| Lint | `npm run lint` | yes |
-| Type-check | `npm run typecheck` | yes |
-| Build | `npm run build` | yes |
-| Install browsers | `npx playwright install --with-deps chromium` | yes |
-| Smoke tests | `npm test` | yes |
-
-`npm test` runs `playwright test`. The Playwright config starts a **fresh** production server on port 3001 (`reuseExistingServer: false`) using the `npm run build` output from the previous step.
-
-**Failure artifacts**: when any step fails, traces (`test-results/`) and screenshots (`test-screenshots/`) are uploaded as artifact `playwright-failure-<run-id>`, retained 7 days. Download from the Actions run page under *Artifacts*.
-
----
-
-### `Label PR` (`.github/workflows/label.yml`)
-
-**Trigger**: `pull_request_target` — opened, synchronize, reopened.
-
-**What it does**: applies labels from `.github/labeler.yml` based on which files the PR touches. Uses `actions/labeler@v5`, which reads the changed-file list via the GitHub API. **No code is checked out. No PR code is executed.**
-
-**Permissions**: `pull-requests: write` only.
-
-**Label mappings**:
-
-| Label | Matched paths |
-|---|---|
-| `frontend` | `app/**`, `components/**`, `hooks/**`, `lib/**`, `tests/**`, `playwright.config.ts`, `**/*.css`, `next.config.*`, `.github/previews/**` |
-| `backend` | `server/**`, `api/**`, `prisma/**`, `migrations/**` |
-| `ci` | `.github/workflows/**`, `.github/labeler.yml` |
-| `documentation` | `docs/**`, `README.md`, `AGENTS.md`, `.github/PULL_REQUEST_TEMPLATE.md` |
-
-Existing repo labels `enhancement` and `documentation` are applied manually by contributors or the orchestrator.
-
----
-
-## Bootstrap status
-
-**CI** (`pull_request` trigger) — active now on all PRs, including PR#2. No merge to `main` needed for CI to run.
-
-**Auto-labeler** (`pull_request_target` trigger) — activates after the workflow file lands on `main` (i.e. after PR#2 merges).
-
-**Labels** — `frontend`, `backend`, `ci`, and `documentation` labels are created in the repo. The commands below are kept for future repos or label recreation:
+## Local gates
 
 ```bash
-gh label create frontend  --repo <owner>/<repo> \
-  --color "e4710f" --description "App, components, hooks, lib, tests, styles"
-gh label create backend   --repo <owner>/<repo> \
-  --color "0075ca" --description "Server, API, database, migrations"
-gh label create ci        --repo <owner>/<repo> \
-  --color "f9c74f" --description "GitHub Actions and CI configuration"
+npm run lint
+npm run typecheck
+npm run test:auth
+npm run build
+npm test
+npm run test:db       # requires TEST_DATABASE_URL or the documented local Postgres
 ```
 
-Labels are documented in `.github/labels.yml` for reference.
+Use `PLAYWRIGHT_PORT=3127 npm test` when the integration worktree is sharing a machine with the other browser suites. Report exact commands and whether a check was local, hosted CI, mocked auth, or a configured-provider check. Do not claim live auth, mail delivery, database reads, or deployment from offline tests.
 
-### Enable branch protection (after first successful check run)
+## Change ownership and merge order
 
-Wait for a CI run to complete successfully before configuring required status checks. Enabling required checks before any check run has recorded a name causes GitHub to treat every subsequent PR as failing the check even when the job passes.
+Keep database, auth, UI, affiliation, private-draft, catalog integration, and deployment work in their scoped changes. The source checkpoints are database `e26e7ad4868683e9eaa4b83ea9eb194cc2acf31b`, auth `5fb5bc2c069f8a50ec453ac02885170dc993dcda`, and UI `d05e80a6a88e2e0fb489bb13c3a65639f99d849e`. User merges source PRs first. The final wiring is then reconciled against the updated `main` using a normal merge where allowed or a fresh final glue branch; preserve source authorship and avoid duplicate squashed cherry-picks.
 
-1. Go to **Settings → Branches → Add rule** for `main`.
-2. Enable **Require status checks to pass before merging**.
-3. Search for and add: `build-and-test`.
-4. Enable **Require branches to be up to date before merging**.
-5. Do **not** enable auto-merge or force-push bypass.
+Every change goes through a PR. Do not auto-merge, force-push, or deploy from an agent. A PR description should state the implemented behavior, demo-only limits, exact validation, and any unperformed hosted gates. Keep private planning, credentials, browser session data, and financial details out of commits and PRs.
 
----
+## Deployment and rollback checklist
 
-## PR process
+Before enabling a configured environment:
 
-- Every change goes through a PR. No direct commits to `main`.
-- No auto-merge. PRs are merged by a human after review.
-- No deployment or production operations are triggered by CI — it is build and test only.
-- Use the PR template (`.github/PULL_REQUEST_TEMPLATE.md`): describe the change and why, fill the validation checklist, attach screenshots for frontend changes.
+1. Confirm the target Neon branch contains the reviewed migration and has the correct environment-specific connection strings.
+2. Apply migrations with the direct migration connection and inspect the resulting schema.
+3. Seed only a named development/demo branch with fictional data after independently verifying the target.
+4. Configure managed auth with a branch-specific endpoint, cookie secret, trusted origin, and tested mail policy.
+5. Run the relevant backend, frontend, and configured-provider checks; record missing credentials or manual gates as unperformed.
 
-## Action version pinning
+Rollback means reverting application code through the normal PR process and forwarding a reviewed SQL migration when data changes require correction. This project does not promise automatic down migrations. Do not delete production data or copy production identities into preview/demo branches as a rollback shortcut.
 
-The workflows use `actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`, and `actions/labeler@v5`. These are the current stable major-version tags. For stricter supply-chain security, replace each tag with a full commit SHA from the action's releases page and add a comment with the tag it resolves to.
+## Stacked feature PR checks
+
+Both test workflows run for every pull request base and pushes to `main` or `polly/**`. Push checks validate branch heads even when merge conflicts prevent GitHub from creating the PR merge ref. The label workflow uses `pull_request_target` and can succeed despite conflicts; label success is not test success. Source owners must resolve conflicts with their prerequisite branch and carry the workflow updates into their source branch before relying on these triggers. Integration changes do not retroactively update other open PRs.
+
+Backend CI runs affiliation and private-draft scripts when those scripts are present, so the same workflow supports independent source slices and the combined branch. The core checkpoint has neither feature service yet. Final integration must expose all landed service scripts and pass them.

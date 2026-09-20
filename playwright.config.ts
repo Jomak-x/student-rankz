@@ -33,6 +33,11 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120 * 1000,
-    env: { NEON_AUTH_BASE_URL: "", NEON_AUTH_COOKIE_SECRET: "" },
+    env: {
+      DATABASE_URL: "",
+      DATABASE_DIRECT_URL: "",
+      NEON_AUTH_BASE_URL: "",
+      NEON_AUTH_COOKIE_SECRET: "",
+    },
   },
 });
