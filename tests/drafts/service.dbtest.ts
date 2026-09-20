@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { eq } from "drizzle-orm";
+
 import { reviewDrafts } from "@/db/draft-schema";
 import type { DraftServiceErrorCode } from "@/server/drafts";
 import {
@@ -106,6 +108,24 @@ test("owned draft CRUD: create, get, list, update, delete", async () => {
     const refetched = await getReviewDraft(handle.db, OWNERS.alice, created.id);
     assert.equal(refetched.revision, 2);
     assert.equal(refetched.body, "Updated body with more detail.");
+
+    // Clearing the optional title with null: the DTO returns null and the
+    // column is actually persisted as NULL in the database.
+    const cleared = await updateReviewDraft(handle.db, OWNERS.alice, created.id, {
+      title: null,
+      revision: 2,
+    });
+    assert.equal(cleared.revision, 3);
+    assert.equal(cleared.title, null);
+    const clearedFetched = await getReviewDraft(handle.db, OWNERS.alice, created.id);
+    assert.equal(clearedFetched.title, null);
+    const storedRows = await handle.db
+      .select({ title: reviewDrafts.title, revision: reviewDrafts.revision })
+      .from(reviewDrafts)
+      .where(eq(reviewDrafts.id, created.id));
+    assert.equal(storedRows.length, 1);
+    assert.equal(storedRows[0].title, null);
+    assert.equal(storedRows[0].revision, 3);
 
     const deleted = await deleteReviewDraft(handle.db, OWNERS.alice, created.id);
     assert.equal(deleted.id, created.id);

@@ -50,10 +50,10 @@ export const reviewDrafts = pgTable(
     ownerSubject: varchar({ length: 255 }).notNull(),
     // What the draft reviews; determines which target column is set.
     targetType: draftTargetTypeEnum().notNull(),
-    // The university the reviewed entity belongs to.
-    universityId: uuid()
-      .notNull()
-      .references(() => universities.id, { onDelete: "cascade" }),
+    // The university the reviewed entity belongs to. The FK is declared
+    // once below as the named table-level constraint
+    // review_drafts_university_fkey, matching the SQL asset exactly.
+    universityId: uuid().notNull(),
     // Set only for course drafts; composite FK forces same university.
     courseId: uuid(),
     // Set only for instructor drafts; composite FK forces same university.
