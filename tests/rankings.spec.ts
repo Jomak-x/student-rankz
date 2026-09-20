@@ -1,11 +1,46 @@
 import { test, expect, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
+import vm from "vm";
+import { createRequire } from "module";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
 import { universities, type University } from "../lib/demo-data";
-import { rankUniversities, RANKINGS_LIMIT } from "../lib/rankings";
-import { RankingsList } from "../components/rankings-list";
+import { rankUniversities, RANKINGS_LIMIT, type RankedUniversity } from "../lib/rankings";
+
+// Playwright's file transform compiles JSX in component files into its
+// component-testing protocol, which react-dom/server cannot render. To test
+// the real RankingsList markup, compile the source directly with the
+// TypeScript compiler (automatic JSX runtime) and stub the two runtime
+// imports that are never exercised by the empty state (next/link, cn).
+const requireFromTests = createRequire(__filename);
+
+function loadRankingsListPlain(): React.ComponentType<{ items: RankedUniversity[] }> {
+  const src = fs.readFileSync(path.join(__dirname, "../components/rankings-list.tsx"), "utf8");
+  const { outputText } = ts.transpileModule(src, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2019,
+      esModuleInterop: true,
+    },
+  });
+  const stubbed = outputText
+    .replace(/require\("next\/link"\)/g, "({ __stub: 'next/link' })")
+    .replace(/require\("@\/lib\/utils"\)/g, "({ cn: (...a) => a.filter(Boolean).join(' ') })");
+  const mod = { exports: {} as Record<string, unknown> };
+  const load = vm.compileFunction(stubbed, ["require", "module", "exports"]);
+  load(
+    (id: string) => {
+      if (id === "react/jsx-runtime") return requireFromTests(id);
+      throw new Error(`unexpected require in compiled component: ${id}`);
+    },
+    mod,
+    mod.exports
+  );
+  return mod.exports.RankingsList as React.ComponentType<{ items: RankedUniversity[] }>;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -99,8 +134,10 @@ test.describe("rankUniversities", () => {
 
 test.describe("rankings empty state", () => {
   test("renders an honest empty state with no university rows", () => {
+    const RankingsList = loadRankingsListPlain();
     const html = renderToStaticMarkup(React.createElement(RankingsList, { items: [] }));
     expect(html).toContain("No universities to rank yet");
+    expect(html).toContain("Rankings will appear here once university data is available.");
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("/universities/");
   });
@@ -181,6 +218,9 @@ test("home rankings preview shows top three and links to full rankings", async (
 
   if (info.project.name === "desktop") {
     await page.goto("/");
+    await page
+      .getByRole("heading", { name: /Top by student experience/i })
+      .scrollIntoViewIfNeeded();
     await captureScreenshot(page, "04-home-preview", info.project.name);
   }
 });
