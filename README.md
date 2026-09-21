@@ -1,57 +1,48 @@
 # Student Rankz
 
-Student Rankz is a Next.js prototype for university, course, and instructor student-experience reviews. The public UI is still a fixture demo: scores and reviews are illustrative sample data, and the review composer stores drafts in the browser only. Database migrations, an explicit synthetic directory seed, and managed authentication are available as separately configured backend slices; the private draft HTTP API and account manager are now wired. Public catalog replacement is pending.
+Student Rankz is a Next.js application for university, course, and instructor student-experience reviews. Public catalog pages read from the database; demo mode uses explicitly seeded synthetic sample data and labels it as such. Public posting and AI moderation are deferred.
 
 ## Prerequisites
 
-- Node.js 22 (LTS)
+- Node.js 22
 - npm 10
+- PostgreSQL only for database, catalog, draft, migration, and integration suites
 
-## Quick start
+## Local checks
 
 ```bash
 npm ci
-npm run dev      # http://localhost:3000
+npm run lint
+npm run typecheck
+npm run build
+PLAYWRIGHT_PORT=3127 npm test
 ```
 
-The demo runs without service credentials. Copy `.env.example` to `.env` for database tooling or `.env.local` for local Next.js overrides, then fill only the server-side values needed for the feature being exercised. The scripts load `.env` when present; Next.js also supports `.env.local`.
+## Database setup
 
-## Commands
+Set `DATABASE_URL` for application reads and `DATABASE_DIRECT_URL` for migrations, then apply the consolidated journal:
 
-| Command | Description |
-|---|---|
-| `npm ci` | Install exact locked dependencies |
-| `npm run dev` | Start the development server |
-| `npm run build` | Build the Next.js application |
-| `npm run start` | Serve the production build |
-| `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript without emitting files |
-| `npm test` | Run the Playwright smoke suite; defaults to port 3001 |
-| `npm run test:auth` | Run offline managed-auth tests |
-| `npm run test:drafts` | Run private draft service and ownership tests |
-| `npm run test:db` | Run database migration, constraint, seed, and configuration tests |
-| `npm run db:migrate` | Apply committed Drizzle migrations using `DATABASE_DIRECT_URL`, then `DATABASE_URL` |
-| `npm run db:seed -- --yes` | Explicitly seed a development or demo database when `SEED_SCOPE` is set |
+```bash
+npm run db:migrate
+```
 
-## Public routes
+This includes `0000`, `0001` private drafts, and `0002` public catalog sample data. Do not run a separate feature migration.
 
-The public catalog routes are currently backed by `lib/demo-data.ts` and remain usable without a database:
+For a confirmed synthetic demo database only:
 
-`/`, `/universities`, `/universities/[id]`, `/courses`, `/courses/[id]`, `/instructors/[id]`, `/rankings`, and `/compare`.
+```bash
+SEED_SCOPE=demo npm run db:seed -- --yes
+SEED_SCOPE=demo node --env-file=.env --import tsx db/demo-ratings-seed-cli.ts --yes --acknowledge-demo-data
+```
 
-`/sign-in`, `/sign-up`, `/account`, and `/account/drafts` are the managed-auth slice. They fail closed and show an unavailable state when the provider is not configured. An authenticated provider identity does not establish affiliation, enrollment, review ownership, or publication permission.
+The `db:seed:demo` npm script does not load `.env`; use the command above or explicitly export `DATABASE_URL` and `SEED_SCOPE=demo` before using it. Never seed production.
 
-## Current limits
+## Product behavior
 
-- The public catalog and rankings do not read the database yet. Database-backed reads, explicit empty/error/demo states, and deployment wiring are pending integration work.
-- Fixture pages still use the labelled local demo composer. The server composer is ready for database target IDs; `/account/drafts` manages server-owned private drafts. Neither path publishes or changes ratings.
-- There is no public posting, moderation gateway, score aggregation service, admin/reporting flow, or live mail delivery.
-- The synthetic database seed is opt-in and contains fictional institutions. It never runs during build, migration, or deploy.
+- Public university, course, instructor, home, and ranking routes use database-backed catalog reads with honest unconfigured, unavailable, and empty states.
+- Demo scores and reviews are synthetic stored samples. Production starts empty and must not fall back to fixtures.
+- Review composers use real catalog UUID targets and save authenticated private drafts. Drafts do not change public scores or rankings.
+- Compare stores up to three university slugs locally in `student-rankz-catalog-compare`.
+- University affiliation remains unavailable pending approval. Public posting and AI moderation are deferred.
 
-See [docs/INTEGRATION.md](docs/INTEGRATION.md) for the merge and configuration checkpoint, [docs/FRONTEND.md](docs/FRONTEND.md) for the UI boundary, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system ownership, and [docs/AUTH.md](docs/AUTH.md) for the managed-auth contract.
-
-## CI
-
-Frontend CI runs lint, typecheck, offline auth tests, build, and Playwright on its default isolated port 3001. The separate Backend workflow runs database tests and migration/seed safety checks against PostgreSQL with a random mapped host port. Neither workflow provisions services or deploys the application. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md).
-
-Private draft setup and HTTP contract: [docs/PRIVATE-DRAFT-HTTP.md](docs/PRIVATE-DRAFT-HTTP.md). Set `APP_ORIGIN` to the exact application origin for mutations.
+See [docs/TESTING.md](docs/TESTING.md), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/INTEGRATION.md](docs/INTEGRATION.md), and [docs/FRONTEND.md](docs/FRONTEND.md). No live provider, deployment, or production validation is claimed here.

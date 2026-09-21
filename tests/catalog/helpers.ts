@@ -1,8 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Client } from "pg";
 
 import {
   closeDb,
@@ -20,15 +18,11 @@ import type { CatalogDatabase } from "@/server/catalog/database";
 // expect.
 type TestDb = ReturnType<typeof drizzle<Record<string, never>>>;
 
-// Ephemeral catalog test helper, layered on the foundation harness
-// (tests/db/helpers.ts): creates a brand-new Postgres database, applies the
-// base Drizzle migrations, then applies the ordered feature migration SQL
-// assets (db/feature-migrations/*.sql) after the base — exactly the sequence
-// the interim operator workflow and final integration use.
+// Each catalog test uses the complete ordered Drizzle journal in a fresh
+// database. Feature SQL must not be replayed outside its tracking protocol.
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const drizzleMigrationsFolder = path.resolve(repoRoot, "drizzle");
-const featureMigrationsFolder = path.resolve(repoRoot, "db/feature-migrations");
 
 export type CatalogEphemeralDatabase = EphemeralDatabase & {
   db: TestDb;
@@ -36,21 +30,6 @@ export type CatalogEphemeralDatabase = EphemeralDatabase & {
 
 export async function createCatalogDatabase(): Promise<CatalogEphemeralDatabase> {
   const ephemeral = await createEphemeralDatabase(drizzleMigrationsFolder);
-
-  const client = new Client({ connectionString: ephemeral.connectionString });
-  await client.connect();
-  try {
-    const files = (await readdir(featureMigrationsFolder))
-      .filter((name) => name.endsWith(".sql"))
-      .sort();
-    for (const file of files) {
-      const sqlText = await readFile(path.join(featureMigrationsFolder, file), "utf8");
-      // Simple query protocol accepts multi-statement SQL files.
-      await client.query(sqlText);
-    }
-  } finally {
-    await client.end();
-  }
 
   const db = drizzle(ephemeral.connectionString, { casing: "snake_case" });
   return { ...ephemeral, db };

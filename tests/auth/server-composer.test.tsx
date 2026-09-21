@@ -3,23 +3,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { ServerReviewComposer } from "@/components/server-review-composer";
+import { ServerReviewComposer, type ReviewDraftTargetType } from "@/components/server-review-composer";
+import { parseCreateInput } from "@/server/drafts/validate";
 
 const fetchMock = vi.fn();
+const universityId = "00000000-0000-4000-8000-000000000001";
+const targetIds = {
+  university: universityId,
+  course: "00000000-0000-4000-8000-000000000002",
+  instructor: "00000000-0000-4000-8000-000000000003",
+} satisfies Record<ReviewDraftTargetType, string>;
 
-function draftResponse() {
+function draftResponse(options: RequestInit) {
+  // Keep the production parser real: HTTP success requires an accepted payload.
+  const parsed = parseCreateInput(JSON.parse(String(options.body)));
   return {
     ok: true,
     status: 201,
     json: vi.fn().mockResolvedValue({
       id: "draft-1",
-      targetType: "course",
-      universityId: "university-1",
-      courseId: "course-1",
-      instructorId: null,
-      title: "Helpful course",
-      body: "The coursework was challenging but the support was excellent.",
-      rating: 4,
+      targetType: parsed.targetType,
+      universityId: parsed.universityId,
+      courseId: parsed.targetType === "course" ? parsed.targetId : null,
+      instructorId: parsed.targetType === "instructor" ? parsed.targetId : null,
+      title: parsed.title,
+      body: parsed.body,
+      rating: parsed.rating,
       revision: 1,
       createdAt: "2026-09-21T00:00:00.000Z",
       updatedAt: "2026-09-21T00:00:00.000Z",
@@ -50,6 +59,7 @@ async function fillReview() {
 describe("server review composer", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    fetchMock.mockImplementation((_url: string, options: RequestInit) => draftResponse(options));
     vi.stubGlobal("fetch", fetchMock);
     window.history.pushState({}, "", "/courses/course-1?tab=reviews");
   });
@@ -59,20 +69,19 @@ describe("server review composer", () => {
     vi.unstubAllGlobals();
   });
 
-  function renderComposer() {
+  function renderComposer(targetType: ReviewDraftTargetType = "course") {
     return render(
       <ServerReviewComposer
-        targetType="course"
-        targetId="course-1"
-        universityId="university-1"
+        targetType={targetType}
+        targetId={targetIds[targetType]}
+        universityId={universityId}
         targetName="Data Structures"
       />,
     );
   }
 
-  it("posts the course draft payload to the server", async () => {
-    fetchMock.mockResolvedValueOnce(draftResponse());
-    renderComposer();
+  it.each(["university", "course", "instructor"] as const)("saves a %s draft using the actual service input contract", async (targetType) => {
+    renderComposer(targetType);
     const user = await fillReview();
 
     await user.click(screen.getByRole("button", { name: "Save draft" }));
@@ -83,20 +92,24 @@ describe("server review composer", () => {
     expect(url).toBe("/api/drafts");
     expect(options.method).toBe("POST");
     expect(options.headers).toEqual({ "Content-Type": "application/json" });
-    expect(JSON.parse(String(options.body))).toEqual({
-      targetType: "course",
-      universityId: "university-1",
-      courseId: "course-1",
+    const payload = JSON.parse(String(options.body));
+    expect(payload).toEqual({
+      targetType,
+      universityId,
+      targetId: targetIds[targetType],
       title: "Helpful course",
       body: "The coursework was challenging but the support was excellent.",
       rating: 4,
       clientRequestKey: expect.any(String),
     });
+    expect(parseCreateInput(payload)).toEqual({
+      ...payload,
+      targetId: targetType === "university" ? null : targetIds[targetType],
+    });
   });
 
   it("retries an ambiguous network failure with the frozen payload and key", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network unavailable"));
-    fetchMock.mockResolvedValueOnce(draftResponse());
     renderComposer();
     const user = await fillReview();
 
@@ -142,7 +155,6 @@ describe("server review composer", () => {
   });
 
   it("confirms a private saved draft and links to the account drafts page", async () => {
-    fetchMock.mockResolvedValueOnce(draftResponse());
     renderComposer();
     const user = await fillReview();
 

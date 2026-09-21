@@ -8,12 +8,14 @@ const baseURL = `http://localhost:${port}`;
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "**/*.spec.ts",
+  testMatch: "*.spec.ts",
+  testIgnore: "**/integration/**",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
   reporter: "list",
+  outputDir: "test-results/smoke",
   use: {
     baseURL,
     trace: "retain-on-failure",
@@ -35,6 +37,7 @@ export default defineConfig({
     timeout: 120 * 1000,
     env: {
       APP_ORIGIN: "",
+      CATALOG_MODE: "production",
       DATABASE_URL: "",
       DATABASE_DIRECT_URL: "",
       NEON_AUTH_BASE_URL: "",

@@ -1,32 +1,36 @@
-# Private draft integration
+# Private draft HTTP API
 
-The draft service and HTTP routes store private university, course, and instructor drafts. Login is sufficient; university email verification is not required. Nothing is published and drafts never contribute to rankings.
+Authenticated users can create, read, update, and delete their own private drafts for real catalog UUID targets. Drafts are never public, never use browser `localStorage`, and never affect public scores or rankings.
 
 ## Configuration and migration
 
-Set `DATABASE_URL`, managed auth variables from `AUTH.md`, and `APP_ORIGIN` to the exact browser origin, such as `https://preview.example.test` (no path or trailing slash). Missing configuration denies writes. Origins are never inferred from request Host or forwarded headers. Use a different provider endpoint and cookie secret for each environment.
+Set `DATABASE_URL`, branch-specific Managed Auth variables, and `APP_ORIGIN` to the exact browser origin with no path or trailing slash. Missing configuration denies private operations.
 
-Run `npm run db:migrate` with the direct database connection. The journal applies directory migration `0000` then private drafts `0001`. The draft schema and generated snapshot declare exactly three named foreign keys. Do not separately apply `db/feature-migrations/private-drafts.sql` in a new installation: that asset is retained for the source service's independent tests. For an environment where that feature asset was already manually applied, reconcile the migration journal through a reviewed migration plan before running `0001`; do not delete tables to bypass it. No automatic down migrations exist.
+```bash
+npm run db:migrate
+```
+
+The consolidated journal applies `0000`, `0001` drafts, and `0002` catalog sample reviews. The bridge supports tracked feature-first installs and upgrades older pre-bridge `0001` installs without replaying draft DDL. A collision with manually applied, untracked DDL is not adopted automatically: stop and use a reviewed migration plan. `npm run db:migrate:feature` is retained for source-asset testing and prior tracked installs, not required for a clean or bridged deployment.
 
 ## API
 
-All responses use `Cache-Control: private, no-store`. Private reads and writes call `getVerifiedWriteSession()` so a cached display identity cannot override provider revocation or outage. Each service operation constrains ownership using the validated provider subject. The subject is never accepted from request data or returned in draft DTOs.
+All responses use `Cache-Control: private, no-store`.
 
 | Method and route | Input | Result |
-|---|---|---|
-| `GET /api/drafts` | Optional `limit` and `offset` query integers | `{ items, hasMore, nextOffset }` owned page |
-| `POST /api/drafts` | Create fields below | Private draft DTO |
-| `GET /api/drafts/[id]` | Draft UUID | Owned DTO or 404 |
-| `PATCH /api/drafts/[id]` | `revision` plus `title`, `body`, and/or `rating` | Updated DTO; stale revision returns 409 |
-| `DELETE /api/drafts/[id]` | Draft UUID | `{ id }`; owner only |
+| --- | --- | --- |
+| `GET /api/drafts` | Optional `limit` and `offset` | Owned paginated draft page |
+| `POST /api/drafts` | Create payload below | Created private draft |
+| `GET /api/drafts/[id]` | Draft UUID | Owned draft or 404 |
+| `PATCH /api/drafts/[id]` | `revision` and one or more editable fields | Updated draft; stale revision is 409 |
+| `DELETE /api/drafts/[id]` | Draft UUID | Deleted `{ id }`; owner only |
 
-Example POST body (synthetic IDs must exist in the configured directory):
+Example course draft payload; `targetId`, not `courseId`, names the course target:
 
 ```json
 {
   "targetType": "course",
   "universityId": "00000000-0000-4000-9000-00000000a001",
-  "courseId": "00000000-0000-4000-9000-00000000c001",
+  "targetId": "00000000-0000-4000-9000-00000000c001",
   "title": "My course notes",
   "body": "A private draft of my experience.",
   "rating": 4,
@@ -34,12 +38,10 @@ Example POST body (synthetic IDs must exist in the configured directory):
 }
 ```
 
-Mutation requests must send the exact allowed Origin. POST and PATCH require `Content-Type: application/json` and a bounded body. Cross-site requests are rejected. The browser supplies Origin automatically; no client identity or CSRF bypass flag exists. Error payloads contain generic `{ error: { code, message } }`, never provider/database diagnostics. Oversized bodies are 413 and unsupported content types are 415. Invalid input is 400, anonymous access 401, disallowed origin 403, missing/foreign resources 404, revision conflict 409, and unavailable dependencies 503.
+The UUIDs above illustrate the payload shape; a real request must use IDs that exist in its configured catalog. Current draft-service fixtures and mocked-auth tests are not live provider or catalog validation.
 
-The service rejects unknown fields, invalid IDs, cross-university targets, and owner injection. A create retry uses the same client request key and returns the original draft, without applying a changed payload. Updates must include the revision last read. Deletion wins over later stale updates; targets are immutable.
+For a university draft, omit `targetId` or set it to the same UUID as `universityId`. Course and instructor drafts require a `targetId` belonging to that university. The service rejects unknown fields, malformed IDs, cross-university targets, owner injection, and stale writes. Creates are idempotent by `clientRequestKey`; the same retry returns the original draft.
 
-## UI boundary
+POST, PATCH, and DELETE require `Content-Type: application/json` where a body is present and an exact allowed `Origin`; cross-site requests are rejected. Error responses are generic and never expose provider, database, ownership, or identity details. Statuses are 400 invalid input, 401 anonymous, 403 bad origin, 404 missing or foreign resource, 409 stale revision, 413 oversized body, 415 non-JSON body, and 503 unavailable dependency.
 
-`/account/drafts` lists, edits, and deletes owned drafts, with empty, error, retry, and stale-revision feedback. The Account page links to it. Input is retained on a failed save. The server composer is selected by supplying a database `universityId` to `ReviewComposer`, alongside a database target ID. Until the separately owned catalog service and page wiring arrive, current fixture pages continue to use the explicitly labelled local demo composer. No fixture identifier is sent as a database ID and old local drafts are never imported.
-
-Offline auth/HTTP/React tests mock provider or request boundaries. Database tests use ephemeral PostgreSQL and real constraints. Browser screenshots show unconfigured states unless explicitly labelled as component fixtures. None establish live provider cookies, hosted session revocation, email, or Neon HTTP transport behavior.
+The review composer uses the database-backed catalog targets directly. It retains input after failed saves and provides retry/revision feedback. No fixture identifiers or local drafts are imported.

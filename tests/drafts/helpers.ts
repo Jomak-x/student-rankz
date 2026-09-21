@@ -17,11 +17,9 @@ import {
 
 // Drafts test harness.
 //
-// Creates a brand-new ephemeral Postgres database, applies the BASE directory
-// migrations (via the shared foundation helper) and then the drafts feature
-// SQL asset on top — exactly the order the integration PR will consolidate
-// into the migration journal later. Nothing is mocked and no real Neon or
-// auth provider is involved.
+// Creates a fresh database with the complete consolidated Drizzle journal.
+// applyFeatureMigration remains available for the source asset's explicit
+// idempotency test. No live database or auth provider is involved.
 
 const migrationsFolder = path.resolve(import.meta.dirname, "../../drizzle");
 const featureMigrationPath = path.resolve(
@@ -51,7 +49,6 @@ export async function applyFeatureMigration(
 
 export async function createDraftsDatabase(): Promise<DraftsTestDatabase> {
   const base = await createEphemeralDatabase(migrationsFolder);
-  await applyFeatureMigration(base.connectionString);
   const db = drizzle(base.connectionString, { casing: "snake_case" });
   return { db, connectionString: base.connectionString, databaseName: base.databaseName };
 }

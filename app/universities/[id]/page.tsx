@@ -1,45 +1,40 @@
+import { cache } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import {
-  getUniversity,
-  getCoursesByUniversity,
-  getInstructorsByUniversity,
-  getReviewsByTarget,
-  universities,
-} from "@/lib/demo-data";
+import { MapPin, Calendar, Users } from "lucide-react";
+import { getCatalogService } from "@/server/catalog";
+import { readCatalog } from "@/server/catalog/read";
+import { CatalogNotice } from "@/components/catalog/catalog-notice";
+import { DetailPagination, DetailRating, DetailReviews, DetailScore, DetailShell, detailPageNumber, type DetailPageProps } from "@/components/catalog/detail";
+import { ScoreBar } from "@/components/score-bar";
+import { ServerReviewComposer } from "@/components/server-review-composer";
+import { CompareToggle } from "@/components/compare-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { StarRating } from "@/components/star-rating";
-import { ScoreBar } from "@/components/score-bar";
-import { ReviewCard } from "@/components/review-card";
-import { ReviewComposer } from "@/components/review-composer";
-import { CompareToggle } from "@/components/compare-toggle";
-import Link from "next/link";
-import { MapPin, Calendar, Users, ArrowRight } from "lucide-react";
 
-type Props = { params: Promise<{ id: string }> };
+export const dynamic = "force-dynamic";
+const loadUniversity = cache((slug: string) => readCatalog(() => getCatalogService().getUniversityDetail(slug)));
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: DetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const uni = getUniversity(id);
-  if (!uni) return { title: "Not found" };
-  return { title: `${uni.name} · Student Reviews` };
+  const result = await loadUniversity(id);
+  return { title: result.status === "ready" ? result.data ? `${result.data.name} · Student Reviews` : "University not found" : "University directory unavailable" };
 }
 
-export function generateStaticParams() {
-  return universities.map((u) => ({ id: u.id }));
-}
-
-export default async function UniversityPage({ params }: Props) {
-  const { id } = await params;
-  const uni = getUniversity(id);
+export default async function UniversityPage({ params, searchParams }: DetailPageProps) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const result = await loadUniversity(id);
+  if (result.status !== "ready") return <DetailShell><CatalogNotice kind={result.status} /></DetailShell>;
+  const uni = result.data;
   if (!uni) notFound();
 
-  const uniCourses = getCoursesByUniversity(id);
-  const uniInstructors = getInstructorsByUniversity(id);
-  const uniReviews = getReviewsByTarget("university", id);
-
+  const service = getCatalogService();
+  const [reviews, courses] = await Promise.all([
+    readCatalog(() => service.listUniversityReviews(uni.slug, { page: detailPageNumber(query.reviewPage) })),
+    readCatalog(() => service.listCourses({ universityId: uni.id, page: detailPageNumber(query.coursePage) })),
+  ]);
+  const pathname = `/universities/${uni.slug}`;
   const scoreLabels: { key: keyof typeof uni.scores; label: string }[] = [
     { key: "teaching", label: "Teaching quality" },
     { key: "support", label: "Student support" },
@@ -50,183 +45,52 @@ export default async function UniversityPage({ params }: Props) {
   ];
 
   return (
-    <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8">
-      {/* Breadcrumb */}
-      <nav className="text-xs text-muted-foreground mb-4 flex items-center gap-1.5">
-        <Link href="/universities" className="hover:text-foreground">
-          Universities
-        </Link>
-        <span>/</span>
-        <span className="text-foreground">{uni.name}</span>
+    <DetailShell>
+      <nav aria-label="Breadcrumb" className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+        <Link href="/universities" className="hover:text-primary">Universities</Link><span>/</span><span className="text-foreground">{uni.name}</span>
       </nav>
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-4 sm:gap-6 mb-6">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2 flex-wrap">
-            <h1 className="text-2xl font-bold leading-tight">{uni.name}</h1>
-            <Badge variant="outline" className="shrink-0 mt-1">
-              {uni.countryCode}
-            </Badge>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start gap-2"><h1 className="text-2xl font-bold leading-tight">{uni.name}</h1><Badge variant="outline">{uni.countryCode}</Badge></div>
+          <div className="mt-2 flex flex-wrap gap-3 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1"><MapPin className="size-3.5" />{uni.city}, {uni.country}</span>
+            {uni.foundedYear !== null && <span className="flex items-center gap-1"><Calendar className="size-3.5" />Founded {uni.foundedYear}</span>}
+            {uni.studentCount !== null && <span className="flex items-center gap-1"><Users className="size-3.5" />{uni.studentCount.toLocaleString("en-US")} students</span>}
           </div>
-          <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <MapPin className="size-3.5" /> {uni.city}, {uni.country}
-            </span>
-            <span className="flex items-center gap-1">
-              <Calendar className="size-3.5" /> Founded {uni.founded}
-            </span>
-            <span className="flex items-center gap-1">
-              <Users className="size-3.5" /> ~{(uni.studentCount / 1000).toFixed(0)}k students
-            </span>
-          </div>
-          <div className="flex items-center gap-2 mt-3">
-            <StarRating value={uni.scores.overall} showValue />
-            <span className="text-sm text-muted-foreground">
-              {uni.reviewCount} demo reviews
-            </span>
-            <Badge variant="secondary" className="text-xs font-normal">
-              Sample data
-            </Badge>
-          </div>
+          <DetailRating value={uni.scores.overall} reviewCount={uni.reviewCount} />
         </div>
-        <div className="flex gap-2 shrink-0">
-          <CompareToggle universityId={id} />
-          <ReviewComposer targetType="university" targetId={id} targetName={uni.name} />
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <CompareToggle universityId={uni.slug} />
+          <ServerReviewComposer targetType="university" targetId={uni.id} universityId={uni.id} targetName={uni.name} />
         </div>
       </div>
-
-      <Separator className="mb-6" />
-
-      <Tabs defaultValue="overview">
-        <TabsList className="mb-6">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="reviews">Reviews ({uniReviews.length})</TabsTrigger>
-          <TabsTrigger value="courses">Courses ({uniCourses.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-6">
-          {/* Description */}
-          <div>
-            <h2 className="font-semibold mb-2">About</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">{uni.description}</p>
-            <div className="flex flex-wrap gap-1.5 mt-3">
-              {uni.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-xs font-normal">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          {/* Scores */}
-          <div>
-            <h2 className="font-semibold mb-3">
-              Category scores
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                — demo sample data, {uni.reviewCount} responses
-              </span>
-            </h2>
-            <div className="space-y-3 max-w-xl">
-              {scoreLabels.map(({ key, label }) => (
-                <ScoreBar key={key} label={label} value={uni.scores[key]} />
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              These scores are fictional demo fixtures. Scores below a proposed threshold of 20
-              distinct verified contributors would be withheld in a real deployment.
-            </p>
-          </div>
-
-          {/* Recent reviews excerpt */}
-          {uniReviews.length > 0 && (
-            <div>
-              <div className="flex items-baseline justify-between mb-3">
-                <h2 className="font-semibold">Recent demo reviews</h2>
-              </div>
-              <div className="space-y-3">
-                {uniReviews.slice(0, 2).map((r) => (
-                  <ReviewCard key={r.id} review={r} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Instructors */}
-          {uniInstructors.length > 0 && (
-            <div>
-              <h2 className="font-semibold mb-3">Instructors</h2>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {uniInstructors.map((inst) => (
-                  <Link
-                    key={inst.id}
-                    href={`/instructors/${inst.id}`}
-                    className="border border-border rounded-lg p-3 hover:border-primary/40 transition-colors group"
-                  >
-                    <p className="font-medium text-sm group-hover:text-primary transition-colors">
-                      {inst.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{inst.role} · {inst.department}</p>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <StarRating value={inst.scores.overall} size="sm" showValue />
-                      <span className="text-xs text-muted-foreground">({inst.reviewCount})</span>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="reviews" className="space-y-4">
-          {uniReviews.length > 0 ? (
-            uniReviews.map((r) => <ReviewCard key={r.id} review={r} />)
-          ) : (
-            <p className="text-muted-foreground text-sm py-8 text-center">No demo reviews yet.</p>
-          )}
-          <div className="pt-2">
-            <ReviewComposer targetType="university" targetId={id} targetName={uni.name} />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="courses" className="space-y-3">
-          {uniCourses.length > 0 ? (
-            uniCourses.map((course) => (
-              <Link
-                key={course.id}
-                href={`/courses/${course.id}`}
-                className="flex items-start justify-between gap-3 border border-border rounded-lg p-4 hover:border-primary/40 transition-colors group"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-sm group-hover:text-primary transition-colors">
-                      {course.name}
-                    </p>
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      {course.code}
-                    </Badge>
-                    <Badge
-                      variant="secondary"
-                      className="text-xs capitalize font-normal shrink-0"
-                    >
-                      {course.level}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {course.department} · {course.credits} ECTS · {course.semester}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <StarRating value={course.scores.overall} size="sm" showValue />
-                  <ArrowRight className="size-4 text-muted-foreground shrink-0" />
-                </div>
-              </Link>
-            ))
-          ) : (
-            <p className="text-muted-foreground text-sm py-8 text-center">No courses listed.</p>
-          )}
-        </TabsContent>
-      </Tabs>
-    </div>
+      <Separator />
+      <nav aria-label="University sections" className="flex flex-wrap gap-4 text-sm text-primary">
+        <a href="#overview">Overview</a><a href="#courses">Courses ({uni.courseCount})</a><a href="#reviews">Sample reviews ({uni.reviewCount})</a>
+      </nav>
+      <section id="overview" className="space-y-3">
+        <h2 className="font-semibold">About</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">{uni.description ?? "No description is available yet."}</p>
+        <Badge variant="secondary" className="capitalize">{uni.type}</Badge>
+        {uni.programmes.length > 0 && <div className="space-y-2"><h3 className="text-sm font-medium">Programmes</h3><ul className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">{uni.programmes.map((programme) => <li key={programme.id}>{programme.name} · <span className="capitalize">{programme.level}</span></li>)}</ul></div>}
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-semibold">Category scores <span className="text-xs font-normal text-muted-foreground">· synthetic sample data</span></h2>
+        <div className="max-w-xl space-y-3">{scoreLabels.map(({ key, label }) => <ScoreBar key={key} label={label} value={uni.scores[key]} />)}</div>
+      </section>
+      <section id="courses" className="scroll-mt-6 space-y-3">
+        <h2 className="font-semibold">Courses</h2>
+        {courses.status !== "ready" ? <CatalogNotice kind={courses.status} title="Courses could not be loaded" /> : <>
+          {courses.data.items.length === 0 ? <CatalogNotice kind="empty" title="No courses on this page" /> : courses.data.items.map((course) => (
+            <Link key={course.id} href={`/courses/${course.id}`} className="group flex flex-col gap-3 rounded-lg border border-border p-4 transition-colors hover:border-primary/40 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0"><h3 className="text-sm font-medium group-hover:text-primary">{course.name}</h3><p className="mt-1 text-xs text-muted-foreground">{course.code} · {course.credits} credits · <span className="capitalize">{course.level}</span>{course.department && ` · ${course.department}`}</p></div>
+              <div className="shrink-0"><DetailScore value={course.scores.overall} /></div>
+            </Link>
+          ))}
+          <DetailPagination pagination={courses.data} pathname={pathname} searchParams={query} pageKey="coursePage" anchor="courses" label="Courses" />
+        </>}
+      </section>
+      <DetailReviews result={reviews} pathname={pathname} searchParams={query} />
+    </DetailShell>
   );
 }

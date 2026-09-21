@@ -16,6 +16,7 @@ jobs:
   database:
     name: Database (ephemeral PostgreSQL)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -41,6 +42,8 @@ jobs:
           echo "DATABASE_URL=postgres://postgres:postgres@localhost:${POSTGRES_PORT}/postgres" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -67,6 +70,19 @@ jobs:
       - name: Private draft service tests
         run: npm run test:drafts
 
+      - name: Build integrated app without service configuration
+        run: npm run build
+        env:
+          DATABASE_URL: ""
+          NEON_AUTH_BASE_URL: ""
+          NEON_AUTH_COOKIE_SECRET: ""
+
+      - name: Install integration browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Real PostgreSQL browser integration
+        run: npm run test:integration
+
       - name: Verify committed migrations apply via drizzle-kit
         run: npx drizzle-kit migrate
 
@@ -77,3 +93,13 @@ jobs:
             exit 1
           fi
           echo "Seed CLI correctly refused without explicit opt-in"
+
+      - name: Upload integration failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-failure-${{ github.run_id }}
+          path: |
+            test-results/integration/
+            test-screenshots/integration/
+          retention-days: 7

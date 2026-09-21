@@ -15,7 +15,7 @@ try {
 
 export default defineConfig({
   out: "./drizzle",
-  schema: ["./db/schema.ts", "./db/draft-schema.ts"],
+  schema: ["./db/schema.ts", "./db/draft-schema.ts", "./db/demo-review-schema.ts"],
   dialect: "postgresql",
   casing: "snake_case",
   dbCredentials: {

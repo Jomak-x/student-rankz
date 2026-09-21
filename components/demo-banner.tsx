@@ -13,7 +13,7 @@ export function DemoBanner() {
         <FlaskConical className="size-3 shrink-0" aria-hidden="true" />
         <strong>Demo · sample data</strong>
         <span className="text-amber-700/70 dark:text-amber-400/70 hidden sm:inline">
-          — all ratings and reviews are illustrative fixtures, not real published data
+          — all ratings and reviews are synthetic samples stored in the demo database
         </span>
       </span>
       <button

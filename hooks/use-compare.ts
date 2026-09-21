@@ -2,23 +2,23 @@
 
 import { useMemo } from "react";
 import { useLocalStorage } from "./use-local-storage";
-import { universities } from "@/lib/demo-data";
+
 
 const MAX_COMPARE = 3;
-const VALID_IDS = new Set(universities.map((u) => u.id));
+const validSlug = (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 120;
 
 function normalizeCompare(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return [
     ...new Set(
-      raw.filter((id): id is string => typeof id === "string" && VALID_IDS.has(id))
+      raw.filter((id): id is string => typeof id === "string" && validSlug(id))
     ),
   ].slice(0, MAX_COMPARE);
 }
 
 export function useCompare() {
   const [rawSelected, setSelected, hydrated] = useLocalStorage<string[]>(
-    "student-rankz-compare",
+    "student-rankz-catalog-compare",
     []
   );
 
@@ -27,7 +27,7 @@ export function useCompare() {
   const selected = useMemo(() => normalizeCompare(rawSelected), [rawSelected]);
 
   const toggle = (id: string) => {
-    if (!VALID_IDS.has(id)) return;
+    if (!validSlug(id)) return;
     setSelected((prev) => {
       const clean = normalizeCompare(prev);
       if (clean.includes(id)) return clean.filter((x) => x !== id);

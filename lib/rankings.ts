@@ -1,28 +1,31 @@
-// Deterministic ranking helpers — sample-data only, not real-world rankings.
-//
-// Order: highest overall student-experience score first. Ties are broken by
-// review count (more sample reviews first), then by name (A–Z) so the result
-// is fully deterministic and stable regardless of input order.
-
-import type { University } from "./demo-data";
+import type { CatalogUniversity } from "./catalog-types";
 
 export const RANKINGS_LIMIT = 10;
 
-export type RankedUniversity = {
-  university: University;
+type RankingUniversity = Pick<
+  CatalogUniversity,
+  "id" | "name" | "city" | "country" | "scores" | "reviewCount"
+>;
+
+export type RankedUniversity<T extends RankingUniversity = RankingUniversity> = {
+  university: T;
   rank: number;
 };
 
-export function rankUniversities(
-  items: University[],
-  limit: number = RANKINGS_LIMIT
-): RankedUniversity[] {
+/**
+ * Keeps ranking presentation deterministic for already-loaded catalog rows.
+ * The catalog service is responsible for selecting ranking-eligible rows.
+ */
+export function rankUniversities<T extends RankingUniversity>(
+  items: T[],
+  limit: number = RANKINGS_LIMIT,
+): RankedUniversity<T>[] {
   return [...items]
     .sort(
       (a, b) =>
-        b.scores.overall - a.scores.overall ||
+        (b.scores.overall ?? -Infinity) - (a.scores.overall ?? -Infinity) ||
         b.reviewCount - a.reviewCount ||
-        a.name.localeCompare(b.name)
+        a.name.localeCompare(b.name),
     )
     .slice(0, Math.max(0, limit))
     .map((university, index) => ({ university, rank: index + 1 }));

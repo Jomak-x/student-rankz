@@ -13,10 +13,13 @@ const migrationsFolder = path.resolve(import.meta.dirname, "../../drizzle");
 const EXPECTED_TABLES = [
   "course_offerings",
   "courses",
+  "feature_migrations",
   "instructors",
   "offering_instructors",
   "programme_courses",
   "programmes",
+  "public_sample_review_ratings",
+  "public_sample_reviews",
   "review_drafts",
   "universities",
 ];
@@ -37,6 +40,13 @@ test("clean migration: fresh database migrates successfully", async () => {
         EXPECTED_TABLES,
       );
 
+      for (const table of EXPECTED_TABLES.filter((name) => name !== "feature_migrations")) {
+        const rows = await client.query(`SELECT count(*) FROM "${table}"`);
+        assert.equal(rows.rows[0].count, "0", `${table}: migration must not seed data`);
+      }
+      const tracked = await client.query("SELECT filename FROM feature_migrations ORDER BY filename");
+      assert.deepEqual(tracked.rows.map((row) => row.filename), ["demo-public-reviews.sql", "private-drafts.sql"]);
+
       const enums = await client.query<{ enum_name: string }>(
         `SELECT t.typname AS enum_name FROM pg_type t
          JOIN pg_enum e ON e.enumtypid = t.oid
@@ -47,10 +57,20 @@ test("clean migration: fresh database migrates successfully", async () => {
         ["draft_target_type", "programme_course_status", "study_level", "university_type"],
       );
 
+      const reviewFks = await client.query(`SELECT conname FROM pg_constraint
+        WHERE conrelid IN ('public_sample_reviews'::regclass, 'public_sample_review_ratings'::regclass)
+          AND contype = 'f' ORDER BY conname`);
+      assert.deepEqual(reviewFks.rows.map((row) => row.conname), [
+        "public_sample_review_ratings_review_fkey",
+        "public_sample_reviews_course_fkey",
+        "public_sample_reviews_instructor_fkey",
+        "public_sample_reviews_university_fkey",
+      ]);
+
       const applied = await client.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
       );
-      assert.equal(applied.rows[0].count, "2");
+      assert.equal(applied.rows[0].count, "3");
     } finally {
       await client.end();
     }
@@ -77,7 +97,7 @@ test("migration is repeatable: applying again is a no-op", async () => {
       const applied = await client.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
       );
-      assert.equal(applied.rows[0].count, "2");
+      assert.equal(applied.rows[0].count, "3");
     } finally {
       await client.end();
     }
@@ -87,7 +107,7 @@ test("migration is repeatable: applying again is a no-op", async () => {
 });
 
 
-test("foundation-only database upgrades to private drafts without changing directory rows", async () => {
+test("foundation-only database upgrades to drafts and demo tables without changing directory rows", async () => {
   const folder = await mkdtemp(path.join(tmpdir(), "sr-base-migration-"));
   await mkdir(path.join(folder, "meta"));
   await copyFile(path.join(migrationsFolder, "0000_old_iron_fist.sql"), path.join(folder, "0000_old_iron_fist.sql"));

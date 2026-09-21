@@ -1,41 +1,38 @@
 # Backend setup
 
-The repository contains database and managed-auth foundations, but the public catalog still uses fixtures and the review composer still uses browser storage. No service, database branch, email sender, or deployment is provisioned by these instructions.
+Copy `.env.example` to `.env` for local operator commands. Keep values server-side and branch-specific.
 
-## Environment files
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Pooled database connection used by the application |
+| `DATABASE_DIRECT_URL` | Direct migration connection; falls back to `DATABASE_URL` when blank |
+| `DATABASE_TRANSPORT` | `neon-http` or `postgres` |
+| `NEON_AUTH_BASE_URL` | Exact Managed Auth endpoint for the selected branch |
+| `NEON_AUTH_COOKIE_SECRET` | Unique secret for that branch's auth cookies |
+| `APP_ORIGIN` | Exact browser origin required for draft writes |
+| `CATALOG_MODE` | `demo` only for the explicit synthetic demo branch |
 
-Copy `.env.example` to `.env` for the database scripts. Next.js also supports `.env.local` for local application overrides. Keep all values server-side and out of commits.
+## Database and seed workflow
 
-| Variable | Used by | Purpose |
-|---|---|---|
-| `DATABASE_URL` | app and migration fallback | Pooled application connection |
-| `DATABASE_DIRECT_URL` | migration tooling | Preferred direct migration connection |
-| `TEST_DATABASE_URL` | `npm run test:db` | Ephemeral or local PostgreSQL test connection |
-| `APP_ORIGIN` | private draft mutations | Exact browser origin, no path/trailing slash |
-| `NEON_AUTH_BASE_URL` | managed auth | Exact provider endpoint for the selected branch |
-| `NEON_AUTH_COOKIE_SECRET` | managed auth | Random server-only cookie secret, at least 32 characters |
-
-Auth values may remain blank for the offline demo. Database values may remain blank until a database command or database-backed feature is exercised. Never use `NEXT_PUBLIC_` for these values. See [AUTH.md](./AUTH.md) for provider-specific setup and its live-service limitations.
-
-## Database workflow
+Run the consolidated journal before using database-backed catalog or draft routes:
 
 ```bash
-npm ci
-npm run test:db
 npm run db:migrate
-SEED_SCOPE=development npm run db:seed -- --yes
 ```
 
-`DATABASE_DIRECT_URL` takes precedence for migrations, then `DATABASE_URL`. The seed requires both an explicit `SEED_SCOPE` of `development` or `demo` and `--yes`. Verify the physical target yourself: a connection string cannot prove which Neon branch it names. The seed is repeatable, fictional, and never runs automatically.
+It applies `0000`, `0001` private drafts, and `0002` catalog sample-review tables. No feature migration command is needed for a clean installation. The migration bridge also supports a database where tracked feature assets were applied first, and upgrades a pre-bridge `0001` installation by backfilling tracking without replaying DDL. If manually applied, untracked DDL collides with the journal, stop and use a reviewed migration plan; do not adopt or delete unknown tables.
 
-The schema covers universities, programmes, courses, programme-course status, dated offerings, instructors, and offering-instructor links. Private drafts are included in the next ordered migration. Affiliation, application identity, public reviews, ratings, and moderation remain separate pending work. See [PRIVATE-DRAFT-HTTP.md](./PRIVATE-DRAFT-HTTP.md).
+For a confirmed synthetic demo target only:
 
-## Neon branch isolation
+```bash
+SEED_SCOPE=demo npm run db:seed -- --yes
+SEED_SCOPE=demo node --env-file=.env --import tsx db/demo-ratings-seed-cli.ts --yes --acknowledge-demo-data
+```
 
-Use one Neon project with synthetic parent data for development, preview, and demo environments. A Neon branch copies existing auth identities and configuration from its parent, so never branch production identities into a non-production environment. Keep each environment's database URL, auth endpoint, and cookie secret separate. No branch or project is created by this repository.
+The ratings seed script does not load `.env`; the explicit Node command does. Neither seed runs during build, migration, CI, or deployment. Production remains empty until approved real catalog data is available.
 
-## Email and deployment gates
+## Runtime boundaries
 
-The repository does not send live email, configure SMTP/Resend, deploy to Vercel, or enable a production auth provider. Before real traffic, an operator must configure the provider and trusted origins, choose the email-verification policy, validate cookie and branch isolation, confirm mail delivery, and run the configured-service checks in [AUTH.md](./AUTH.md). Password recovery and affiliation verification remain unclaimed until exercised against the configured service.
+The catalog is database-backed and returns only public DTOs. Private drafts require a verified managed-auth session, an exact `APP_ORIGIN` for mutations, and real university/course/instructor UUID targets. Drafts are not local browser storage and do not affect public scores. Compare slugs are the only catalog browser persistence.
 
-There is no public posting or moderation gateway. Do not treat a seeded directory as published student reviews or real ratings.
+Affiliation remains unavailable pending approval. Public review posting and AI moderation are deferred. No Neon, Auth, mail, DNS, or deployment validation is claimed here.

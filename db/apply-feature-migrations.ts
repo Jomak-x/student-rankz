@@ -1,7 +1,8 @@
 // Feature migration runner: applies the ordered SQL assets in
 // db/feature-migrations/ AFTER the base Drizzle migrations (npm run
 // db:migrate). Explicitly operator-invoked only — never part of build,
-// deploy or CI pipelines.
+// deploy or CI pipelines. Consolidated Drizzle migrations record these same
+// filenames atomically, so their feature assets are skipped on later CLI runs.
 //
 // Idempotency, atomicity and concurrency safety:
 //   All work runs inside ONE transaction:
@@ -34,13 +35,14 @@ import { Client } from "pg";
 
 const FEATURE_MIGRATIONS_DIR = path.resolve(import.meta.dirname, "feature-migrations");
 
-// Stable advisory lock key for this runner.
+// Shared with the consolidated Drizzle bridges (0001 and 0002). Keep this
+// transaction-scoped lock around BOTH the tracking read and all DDL/writes.
 const ADVISORY_LOCK_KEY = 5731;
 
 // Tracking table DDL — included inside the transaction so it is also
 // covered by the advisory lock and rolled back on failure.
 const TRACKING_TABLE_DDL = `
-CREATE TABLE IF NOT EXISTS feature_migrations (
+CREATE TABLE IF NOT EXISTS public.feature_migrations (
   filename TEXT PRIMARY KEY,
   applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 )`;
@@ -89,7 +91,7 @@ async function main(): Promise<void> {
       await client.query(TRACKING_TABLE_DDL);
 
       const result = await client.query<{ filename: string }>(
-        "SELECT filename FROM feature_migrations",
+        "SELECT filename FROM public.feature_migrations",
       );
       const applied = new Set(result.rows.map((r) => r.filename));
 
@@ -103,7 +105,7 @@ async function main(): Promise<void> {
         await client.query(sqlText);
         // Record inside the same transaction: schema change and tracking
         // record commit or roll back together.
-        await client.query("INSERT INTO feature_migrations (filename) VALUES ($1)", [file]);
+        await client.query("INSERT INTO public.feature_migrations (filename) VALUES ($1)", [file]);
         console.log(`Applied feature migration: ${file}`);
       }
 

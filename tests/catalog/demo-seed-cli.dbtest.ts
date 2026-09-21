@@ -16,7 +16,17 @@ type CliOutcome = { code: number; stderr: string; stdout: string };
 
 async function runCli(env: Record<string, string | undefined>, args: string[] = []): Promise<CliOutcome> {
   const childEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries({ ...process.env, ...env })) {
+  // Guard tests must never inherit a real database target or deployment state.
+  const isolated = {
+    ...process.env,
+    DATABASE_URL: undefined,
+    DATABASE_DIRECT_URL: undefined,
+    SEED_SCOPE: undefined,
+    NODE_ENV: "test",
+    VERCEL_ENV: undefined,
+    ...env,
+  };
+  for (const [key, value] of Object.entries(isolated)) {
     if (value !== undefined) {
       childEnv[key] = value;
     }
@@ -39,7 +49,7 @@ async function runCli(env: Record<string, string | undefined>, args: string[] = 
 }
 
 const FULLY_CONFIRMED = {
-  DATABASE_URL: "postgres://postgres:postgres@localhost:15432/postgres",
+  DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:1/refusal_only",
   SEED_SCOPE: "demo",
 };
 

@@ -32,8 +32,7 @@ export interface ServerReviewComposerProps {
 type DraftPayload = {
   targetType: ReviewDraftTargetType;
   universityId: string;
-  courseId?: string;
-  instructorId?: string;
+  targetId: string;
   title: string;
   body: string;
   rating: number;
@@ -99,17 +98,15 @@ export function ServerReviewComposer({
   const disabled = pending || frozen;
 
   function buildPayload(): DraftPayload {
-    const payload: DraftPayload = {
+    return {
       targetType,
       universityId,
+      targetId,
       title: title.trim(),
       body: body.trim(),
       rating,
       clientRequestKey: createClientRequestKey(),
     };
-    if (targetType === "course") payload.courseId = targetId;
-    if (targetType === "instructor") payload.instructorId = targetId;
-    return payload;
   }
 
   function clearRequestState() {
