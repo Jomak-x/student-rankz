@@ -51,6 +51,9 @@ jobs:
       - name: Database tests (migration, constraints, repeatable seed)
         run: npm run test:db
 
+      - name: Feature migration runner tests (idempotency, isolation, concurrency)
+        run: npm run test:migrations
+
       - name: Catalog service tests (queries, ratings, privacy, seed CLI guards)
         run: npm run test:catalog
 
