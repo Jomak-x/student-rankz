@@ -2,7 +2,6 @@ name: Backend
 
 on:
   pull_request:
-    branches: ['**']
   push:
     branches: [main]
 
@@ -41,7 +40,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify checkout SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          echo "Expected checkout: $EXPECTED_SHA"
+          echo "Actual checkout: $ACTUAL_SHA"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
 
       - uses: actions/setup-node@v4
         with:

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:drafts": "node --import tsx --test tests/drafts/migration.dbtest.ts tests/drafts/transport.dbtest.ts tests/drafts/service.dbtest.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -10,7 +11,6 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts tests/db/config.dbtest.ts tests/db/seed-cli.dbtest.ts tests/db/helpers.dbtest.ts",
-    "test:drafts": "node --import tsx --test tests/drafts/migration.dbtest.ts tests/drafts/transport.dbtest.ts tests/drafts/service.dbtest.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx db/seed-cli.ts"
