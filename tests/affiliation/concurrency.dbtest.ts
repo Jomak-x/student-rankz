@@ -386,3 +386,61 @@ test("concurrency: verified address cannot be changed by a concurrent initiate f
     await dropAffiliationTestDb(db1, databaseName);
   }
 });
+
+// ── Concurrent consume vs address-changing initiate ─────────────────────────
+
+test("concurrency: consume grants verification while concurrent initiate tries address change — verified address is stored", async () => {
+  // Sequence with real concurrent barrier:
+  //   1. Alice initiates for student email → challenge created, delivery confirmed.
+  //   2. Concurrently: Alice consumes the code AND re-initiates with staff email.
+  //   3. If consume wins the FOR UPDATE lock first, the row becomes verified=true
+  //      with the student email. The initiate then sees ALREADY_VERIFIED.
+  //   4. If initiate wins first, it overwrites the challenge — consume then
+  //      returns INVALID_CODE (stale challenge). Either way, the DB row must be
+  //      internally consistent.
+  //   5. Assert the stored emailAddress matches verified or the active challenge.
+  const { db: db1, databaseName, connectionString } = await createAffiliationTestDb();
+  const db2 = makeSecondDb(connectionString);
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  try {
+    await seedFixtures(db1);
+
+    const transport = new MockTransport();
+    const s1 = new AffiliationService({ db: db1, transport, hmacSecret: SECRET });
+    const s2 = new AffiliationService({ db: db2, transport, hmacSecret: SECRET });
+
+    await s1.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const code = transport.sent[0].code;
+
+    // Fire both concurrently — real FOR UPDATE serialization.
+    const [consumeResult, initiateResult] = await Promise.all([
+      s1.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code),
+      s2.initiate("sub|alice", `alice@${DOMAINS.westhavenStaff}`),
+    ]);
+
+    // Read the row's final state.
+    const [row] = await db1.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+
+    if (consumeResult.ok) {
+      // Consume won — row must be verified with the student address.
+      assert.equal(row.verified, true);
+      assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStudent}`);
+      assert.deepEqual(initiateResult, { ok: false, error: "ALREADY_VERIFIED" });
+    } else {
+      // Initiate won — the challenge was overwritten; consume got stale HMAC.
+      assert.equal(consumeResult.error, "INVALID_CODE");
+      assert.ok(initiateResult.ok);
+      assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStaff}`);
+      assert.equal(row.verified, false);
+    }
+  } finally {
+    await closeDb(db2);
+    await dropAffiliationTestDb(db1, databaseName);
+  }
+});

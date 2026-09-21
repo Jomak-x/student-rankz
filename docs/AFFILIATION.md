@@ -15,7 +15,7 @@ The service is implemented and tested.  No Next.js routes or auth UI exist in th
 - **Principal from server session only.** The caller supplies the account subject from a validated server-side session.  The subject is never inferred from the request body.
 - **Single-row per (account, university).** One slot per pair; re-sending invalidates the previous challenge.
 - **Atomic reservation.** `INSERT … ON CONFLICT DO NOTHING` + `SELECT … FOR UPDATE` serializes concurrent initiations; throttle and verified checks run under the row lock.
-- **Atomic cross-account recipient throttle.** `pg_advisory_xact_lock(hashtext(email))` serializes concurrent requests to the same recipient across all accounts.  The per-email count is time-bounded (1-hour window) so expired/abandoned challenges release capacity.
+- **Durable cross-account recipient throttle.** `pg_advisory_xact_lock(hashtext(email))` serializes concurrent requests to the same recipient.  Sends are recorded in the immutable `recipient_send_log` table — independent of the mutable verification row.  Address changes and new challenges do **not** erase log entries.  The per-email count is time-bounded (1-hour window); expired entries are pruned inside the advisory lock.
 - **No transaction held across I/O.** The DB transaction commits before the email is sent.  The delivery-state machine coordinates what happens after.
 - **Delivery-state guard.** A challenge is only consumable once the transport confirms delivery (`delivery_state = 'sent'`).  A challenge in `delivery_state = 'pending'` (written but not yet confirmed) or `null` (cleared) is not consumable.
 - **Scoped failure cleanup.** On transport error, the cleanup `UPDATE` is scoped to the specific `challenge_id` generated for this send.  A concurrent resend that already committed a new challenge is not affected.
@@ -34,16 +34,23 @@ Production uses `drizzle-orm/neon-serverless` (WebSocket Pool) — **not** `driz
 ### Database factory
 
 ```ts
-import { createAffiliationDb, closeAffiliationDb } from "@/server/affiliation/db";
+import {
+  createAffiliationDb,
+  getAffiliationDb,
+  closeAffiliationDb,
+} from "@/server/affiliation/db";
 
-// Create (or reuse singleton):
-const { db, pool } = createAffiliationDb();
-
-// In long-running Node.js processes, close on shutdown:
+// Singleton (recommended for long-running processes):
+const db = getAffiliationDb();
 process.on("SIGTERM", () => closeAffiliationDb());
+
+// Standalone (e.g. tests, scripts): close the SAME pool you created.
+const { db, pool } = createAffiliationDb();
+// ... use db ...
+await pool.end();   // NOT closeAffiliationDb() — that only closes the singleton
 ```
 
-`getAffiliationDb()` returns the lazy singleton `db`.  `closeAffiliationDb()` drains the pool and clears the singleton; it is safe to call multiple times.
+`getAffiliationDb()` returns the lazy singleton `db`.  `closeAffiliationDb()` drains the **singleton** pool only; standalone pools created by `createAffiliationDb()` must close their own `pool.end()`.  Both functions are safe to call multiple times.
 
 ### Service construction
 
@@ -98,16 +105,18 @@ The scoped cleanup `WHERE challenge_id = X AND delivery_state = 'pending'` only 
 3. (Moved inside the transaction — see step 4.)
 4. Begin transaction:
    - `pg_advisory_xact_lock(hashtext(email))` — serializes all senders to same recipient.
-   - Per-email recipient count (time-bounded: only challenges updated within the last hour) → `RATE_LIMITED`.
+   - Prune expired `recipient_send_log` entries (>1 hour old) for this email.
+   - Count remaining log entries for this email → `RATE_LIMITED` if `≥ maxSendsPerEmailPerHour`.
    - `INSERT INTO account_verifications … ON CONFLICT DO NOTHING` — creates the slot if absent.
    - `SELECT … FOR UPDATE` — locks the slot.
    - Check `verified = true` → `ALREADY_VERIFIED`.
    - Check per-account send rate → `RATE_LIMITED`.
    - Write `challenge_id = <uuid>`, `delivery_state = 'pending'`, `code_hmac = <context-bound HMAC>`, `code_expires_at`, `attempt_count = 0`.
+   - Insert `recipient_send_log` entry (recipient_email, challenge_id) — immutable reservation.
 5. Transaction commits.
 6. Call `transport.sendVerificationCode({ to, code, universityName })`.
    - On success: `UPDATE … SET delivery_state = 'sent' WHERE challenge_id = X AND delivery_state = 'pending'`.
-   - On failure: `UPDATE … SET challenge_id = null, delivery_state = null, code_hmac = null, code_expires_at = null WHERE challenge_id = X AND delivery_state = 'pending'`.  Returns `SEND_FAILED`.
+   - On failure: delete the `recipient_send_log` entry for this challenge_id, then `UPDATE … SET challenge_id = null, delivery_state = null, code_hmac = null, code_expires_at = null WHERE challenge_id = X AND delivery_state = 'pending'`.  Returns `SEND_FAILED`.
 
 Returns:
 - `{ ok: true, universityId }` on success
@@ -163,6 +172,21 @@ HMAC-SHA256(hmacSecret, "${principal}\0${universityId}\0${normalizedEmail}\0${co
 Null-byte field separators prevent concatenation collisions (e.g., `"a\0b" + "c"` ≠ `"a" + "\0b\0c"`).
 
 The binding means a code for Alice cannot be replayed as Bob, a code for university A cannot be used at university B, and a code issued to `alice@a.edu` cannot be replayed for `alice@b.edu`.
+
+---
+
+## `recipient_send_log` (durable throttle ledger)
+
+The `recipient_send_log` table records each send reservation independently of the mutable `account_verifications` row.  This prevents the address-switch attack: if an account initiates for `victim@domain` and then re-initiates for `other@domain`, the original send-log entry for `victim@domain` survives the address change.
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `recipient_email` | text | Normalized email the send was targeted at |
+| `challenge_id` | UUID | Links to the challenge that triggered this send |
+| `sent_at` | timestamptz | When the reservation was created (defaults to `now()`) |
+
+Entries older than 1 hour are pruned inside the advisory lock during initiate.  On send failure, the log entry for the failed challenge_id is deleted to release capacity.
 
 ---
 

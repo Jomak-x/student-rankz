@@ -487,6 +487,51 @@ test("consume: HMAC context-binding — deterministic same-code transplanted to 
   }
 });
 
+test("consume: HMAC is bound to email — deterministic same-code transplanted to different email context", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const { service } = makeService(db, transport);
+
+    // Alice initiates with student email.
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const studentCode = transport.sent[0].code;
+
+    const [studentRow] = await db.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+
+    // Alice resends with staff email (same account/university, different email).
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStaff}`);
+
+    // Transplant the student-email HMAC into the now-staff-email row.
+    await db.update(accountVerifications).set({
+      codeHmac: studentRow.codeHmac,
+      codeExpiresAt: studentRow.codeExpiresAt,
+      challengeId: studentRow.challengeId,
+    }).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+
+    // Consume with the student code against the staff-email row — must fail
+    // because the HMAC binds to email.
+    const result = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStaff}`, studentCode);
+    assert.ok(!result.ok);
+    assert.equal(result.error, "INVALID_CODE");
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
 // ── consume: replay ───────────────────────────────────────────────────────────
 
 test("consume: replaying the same code fails with ALREADY_VERIFIED", async () => {
@@ -647,40 +692,65 @@ test("initiate: per-email rate-limits cross-account sends", async () => {
   }
 });
 
-// ── rate limiting: expired challenges release capacity ───────────────────
+// ── rate limiting: expired log entries release capacity ──────────────────
 
-test("initiate: expired cross-account challenges do not permanently block email", async () => {
+test("initiate: expired send-log entries do not permanently block email", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
-  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { recipientSendLog } = await import("@/db/affiliation-schema");
   try {
     await seedFixtures(db);
-    const transport = new MockTransport();
     const service = new AffiliationService({
       db,
-      transport,
+      transport: new MockTransport(),
       hmacSecret: SECRET,
       maxSendsPerHour: 10,
       maxSendsPerEmailPerHour: 1,
     });
 
-    // Insert an old challenge row that has delivery_state='sent' but was
-    // updated > 1 hour ago — simulates an abandoned request.
+    // Insert an old log entry (>1 hour ago) — simulates an expired send.
     const pastHour = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    await db.insert(accountVerifications).values({
-      accountSubject: "sub|old-account",
-      universityId: UNIVERSITIES.westhaven,
-      emailAddress: `alice@${DOMAINS.westhavenStudent}`,
-      deliveryState: "sent",
-      codeHmac: "deadbeef".repeat(8),
-      codeExpiresAt: pastHour,
-      sendWindowStartsAt: pastHour,
-      updatedAt: pastHour,
-      sendCount: 1,
+    await db.insert(recipientSendLog).values({
+      recipientEmail: `alice@${DOMAINS.westhavenStudent}`,
+      challengeId: "00000000-0000-4000-9000-eeeeeeee0099",
+      sentAt: pastHour,
     });
 
-    // A new account should NOT be blocked by the stale row.
+    // A new account should NOT be blocked by the expired log entry.
     const result = await service.initiate("sub|new-account", `alice@${DOMAINS.westhavenStudent}`);
-    assert.ok(result.ok, `Stale row should not block: ${JSON.stringify(result)}`);
+    assert.ok(result.ok, `Expired log entry should not block: ${JSON.stringify(result)}`);
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+// ── rate limiting: address-switch does not erase recipient history ───────
+
+test("initiate: sequential cross-account address-switch does not bypass per-email limit", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const service = new AffiliationService({
+      db,
+      transport: new MockTransport(),
+      hmacSecret: SECRET,
+      maxSendsPerHour: 10,
+      maxSendsPerEmailPerHour: 2,
+    });
+
+    // AccountA initiates for victim → log entry for victim (count=1)
+    assert.ok((await service.initiate("sub|acctA", `victim@${DOMAINS.westhavenStudent}`)).ok);
+    // AccountA resends with a different address — the verification row's
+    // emailAddress changes, but the send-log entry for victim remains.
+    assert.ok((await service.initiate("sub|acctA", `other@${DOMAINS.westhavenStudent}`)).ok);
+
+    // AccountB initiates for victim → log still shows 1 for victim (count=2)
+    assert.ok((await service.initiate("sub|acctB", `victim@${DOMAINS.westhavenStudent}`)).ok);
+    // AccountB also switches address
+    assert.ok((await service.initiate("sub|acctB", `other2@${DOMAINS.westhavenStudent}`)).ok);
+
+    // AccountC tries victim → must be RATE_LIMITED (2 log entries for victim)
+    const r = await service.initiate("sub|acctC", `victim@${DOMAINS.westhavenStudent}`);
+    assert.deepEqual(r, { ok: false, error: "RATE_LIMITED" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -820,6 +890,7 @@ test("affiliation migration: expected tables, columns, and constraints exist", a
     const names = tables.rows.map((r) => r.table_name);
     assert.ok(names.includes("university_domains"), "university_domains table missing");
     assert.ok(names.includes("account_verifications"), "account_verifications table missing");
+    assert.ok(names.includes("recipient_send_log"), "recipient_send_log table missing");
 
     // New columns present.
     const cols = await client.query<{ column_name: string }>(

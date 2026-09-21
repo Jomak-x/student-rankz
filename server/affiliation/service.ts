@@ -3,7 +3,7 @@ import { createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 
-import { accountVerifications, universityDomains } from "@/db/affiliation-schema";
+import { accountVerifications, recipientSendLog, universityDomains } from "@/db/affiliation-schema";
 import { universities } from "@/db/schema";
 import { parseEmail } from "./domain.js";
 import type { EmailTransport } from "./email.js";
@@ -139,16 +139,26 @@ export class AffiliationService {
         sql`SELECT pg_advisory_xact_lock(hashtext(${normalizedEmail}))`,
       );
 
-      // Per-email recipient throttle — time-bounded to avoid permanent lockout
-      // from abandoned/expired challenges.
-      const [{ emailCount }] = await (tx as AffiliationDb)
-        .select({ emailCount: sql<number>`count(*)::int` })
-        .from(accountVerifications)
+      // Prune expired log entries for this recipient (bounded cleanup).
+      await (tx as AffiliationDb)
+        .delete(recipientSendLog)
         .where(
           and(
-            eq(accountVerifications.emailAddress, normalizedEmail),
-            sql`${accountVerifications.deliveryState} IS NOT NULL`,
-            sql`${accountVerifications.updatedAt} > now() - interval '1 hour'`,
+            eq(recipientSendLog.recipientEmail, normalizedEmail),
+            sql`${recipientSendLog.sentAt} <= now() - interval '1 hour'`,
+          ),
+        );
+
+      // Per-email recipient throttle — counts from the immutable send log,
+      // not the mutable verification row.  Address changes and new challenges
+      // do not erase send history.
+      const [{ emailCount }] = await (tx as AffiliationDb)
+        .select({ emailCount: sql<number>`count(*)::int` })
+        .from(recipientSendLog)
+        .where(
+          and(
+            eq(recipientSendLog.recipientEmail, normalizedEmail),
+            sql`${recipientSendLog.sentAt} > now() - interval '1 hour'`,
           ),
         );
       if (emailCount >= this.maxSendsPerEmailPerHour) {
@@ -210,6 +220,14 @@ export class AffiliationService {
         })
         .where(eq(accountVerifications.id, record.id));
 
+      // Record the send in the immutable recipient log.  This entry survives
+      // address changes and challenge overwrites; it is only removed on send
+      // failure (scoped by challengeId) or by time-based pruning.
+      await (tx as AffiliationDb).insert(recipientSendLog).values({
+        recipientEmail: normalizedEmail,
+        challengeId,
+      });
+
       return { ok: true as const };
     });
 
@@ -223,12 +241,11 @@ export class AffiliationService {
         universityName: uni.name,
       });
     } catch {
-      // Scoped failure cleanup: only clear THIS challenge.
-      // WHERE challenge_id = X ensures a concurrent resend that has already
-      // committed a new challenge_id is not affected.
-      // WHERE delivery_state = 'pending' ensures we don't clear a challenge
-      // that another path already confirmed.
-      // Redact: never log the code, address, or university name.
+      // Scoped failure cleanup: remove the send-log reservation for THIS
+      // challenge, then clear the challenge from the verification row.
+      await this.db
+        .delete(recipientSendLog)
+        .where(eq(recipientSendLog.challengeId, challengeId));
       await this.db
         .update(accountVerifications)
         .set({
