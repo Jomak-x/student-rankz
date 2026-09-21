@@ -13,6 +13,12 @@
 // scope is a statement by the operator, not a property of the URL. Never
 // point SEED_SCOPE at a production database: production must contain only
 // real records (or be honestly empty) and must never receive synthetic rows.
+//
+// Configuration loading matches drizzle.config.ts: the project .env file is
+// loaded when present (Node >= 20.12) before validation, so copying
+// .env.example to .env is enough for the documented `npm run db:seed`
+// workflow. Exported environment variables take precedence over .env values
+// (Node semantics). Connection strings are never logged.
 
 import { seedDatabase, createSeedClient } from "@/db/seed";
 
@@ -32,6 +38,12 @@ function fail(message: string): never {
 }
 
 async function main(): Promise<void> {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // No .env file in the working directory — environment variables only.
+  }
+
   const hasYesFlag = process.argv.includes("--yes");
   const scope = process.env.SEED_SCOPE;
   const url = process.env.DATABASE_URL;
