@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { CircleUserRound, Mail, ShieldAlert } from "lucide-react";
@@ -70,6 +71,7 @@ export default async function AccountPage() {
             </div>
           </div>
 
+          <Link href="/account/drafts" className="block font-medium text-primary underline underline-offset-4">Your private drafts</Link>
           <SignOutButton />
         </CardContent>
       </Card>

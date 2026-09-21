@@ -43,4 +43,6 @@ Rollback means reverting application code through the normal PR process and forw
 
 Both test workflows run for every pull request base and pushes to `main` or `polly/**`. Push checks validate branch heads even when merge conflicts prevent GitHub from creating the PR merge ref. The label workflow uses `pull_request_target` and can succeed despite conflicts; label success is not test success. Source owners must resolve conflicts with their prerequisite branch and carry the workflow updates into their source branch before relying on these triggers. Integration changes do not retroactively update other open PRs.
 
-Backend CI runs affiliation and private-draft scripts when those scripts are present, so the same workflow supports independent source slices and the combined branch. The core checkpoint has neither feature service yet. Final integration must expose all landed service scripts and pass them.
+Backend CI runs the private-draft script and runs affiliation when its script is present, so the same workflow supports independent source slices and the combined branch. Private draft tests are now mandatory in the integration workflow; affiliation is absent until its approved repair is integrated. Final integration must expose all landed service scripts and pass them.
+
+Random PostgreSQL port URLs are configured in a step, where GitHub exposes `job.services`. Job-level `env` cannot access the `job` context; the earlier core checkpoint workflow failed before creating a database job for this reason. No PR-head code is run under `pull_request_target`.

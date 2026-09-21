@@ -14,7 +14,7 @@ The auth slice provides managed Neon Auth routes, sign-in/sign-up/account UI, a 
 
 Catalog and database reads, controlled search/pagination, and honest missing-config/empty/outage/demo states are owned by a later worker. The current public UI must not be described as database-backed.
 
-University affiliation, application identity mapping, private server-side drafts, and their authorization rules are also pending. Do not invent routes or SQL interfaces for those features in dependent documentation. Public posting, moderation, publication, live score aggregation, reports, and admin controls remain deferred.
+Private server drafts now have authenticated HTTP routes and an account manager; their composer awaits database catalog targets. University affiliation and application identity mapping remain pending. Do not invent routes or SQL interfaces for those features in dependent documentation. Public posting, moderation, publication, live score aggregation, reports, and admin controls remain deferred.
 
 ```mermaid
 flowchart TB

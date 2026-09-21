@@ -80,3 +80,29 @@ test("account navigation fits intermediate screen widths", async ({ page }) => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });
+
+test("private draft account and API fail closed without configuration", async ({ page, request }, info) => {
+  await page.goto("/account/drafts");
+  await expect(page.getByText("Account access is temporarily unavailable")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Save changes|Delete draft/ })).toHaveCount(0);
+  await mkdir(`test-screenshots/${info.project.name}`, { recursive: true });
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/private-drafts-unavailable-light.png`, fullPage: true });
+  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await page.getByRole("menuitem", { name: "Dark", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.screenshot({ path: `test-screenshots/${info.project.name}/private-drafts-unavailable-dark.png`, fullPage: true });
+  for (const response of [
+    await request.get("/api/drafts"),
+    await request.get("/api/drafts/00000000-0000-4000-9000-00000000a001"),
+    await request.post("/api/drafts", { data: {} }),
+    await request.patch("/api/drafts/00000000-0000-4000-9000-00000000a001", { data: {} }),
+    await request.delete("/api/drafts/00000000-0000-4000-9000-00000000a001"),
+  ]) {
+    expect(response.status()).toBe(503);
+    expect(response.headers()["cache-control"]).toContain("no-store");
+    expect(await response.json()).toHaveProperty("error.code");
+    expect(response.headers()["set-cookie"]).toBeUndefined();
+  }
+});

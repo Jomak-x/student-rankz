@@ -1,6 +1,6 @@
 # Integration checkpoint
 
-This checkpoint joins the database foundation, managed auth, and frontend source work while keeping their ownership boundaries explicit. The public UI currently remains a fixture demo, and the review composer remains local-only. Catalog database reads, empty/error/demo states, private server drafts, and affiliation modules are pending their respective workers.
+This checkpoint joins the database foundation, managed auth, and frontend source work while keeping their ownership boundaries explicit. The public UI currently remains a fixture demo, and the review composer remains local-only. Private draft API and account management are wired; catalog database reads and affiliation are pending approved source integration.
 
 ## Source provenance and order
 
@@ -10,7 +10,9 @@ The integration branch preserves these source checkpoints with their authorship 
 |---|---|
 | Database foundation | `e26e7ad4868683e9eaa4b83ea9eb194cc2acf31b` |
 | Managed auth | `5fb5bc2c069f8a50ec453ac02885170dc993dcda` |
-| Rankings/UI | `d05e80a6a88e2e0fb489bb13c3a65639f99d849e` |
+| Rankings/UI | `a8f90849ddebe7c921fc5f768b59a0afa49b3839` |
+
+Private draft source: `166748e212d46d62045080ac8db462f0ed425239` (PR #8), independently approved.
 
 The user merges those source PRs first. After they land, reconcile this work against the updated `main` with a normal merge where permitted or a fresh final glue branch. Avoid replaying already merged squashed commits. Agents do not merge, force-push, or deploy.
 
@@ -45,10 +47,12 @@ The default browser port is 3001. This integration worktree uses 3127 to avoid t
 
 ## Remaining product gates
 
-The next implementation must add server-side catalog reads with controlled search/pagination and explicit missing-config, empty, outage, and opt-in demo states. Later work must add application identity mapping, affiliation, and authenticated private drafts with ownership checks. Public posting, moderation, publication, reports, and live score aggregation remain deferred. No AI gateway, mail provider, public gateway, provisioning, or deployment is configured by this checkpoint.
+The next implementation must add server-side catalog reads with controlled search/pagination and explicit missing-config, empty, outage, and opt-in demo states. Private draft HTTP and account management are implemented; final catalog pages must supply database target IDs to the server composer. Affiliation remains disabled pending approved repairs. Public posting, moderation, publication, reports, and live score aggregation remain deferred. No AI gateway, mail provider, public gateway, provisioning, or deployment is configured by this checkpoint.
 
 The university-verification feature is a separate pending PR and is not integrated or claimed reviewed by this checkpoint.
 
 ## Rollback and release limits
 
 Revert application changes through a reviewed PR. Data corrections require a reviewed forward SQL migration; no automatic down migration is promised. Keep synthetic seed data isolated and preserve provider branch boundaries. Record any missing credentials, live-provider checks, or manual deployment steps as unperformed rather than inferring success from local builds.
+
+See [PRIVATE-DRAFT-HTTP.md](./PRIVATE-DRAFT-HTTP.md) for the implemented API, exact-origin configuration, migration order, ownership, and retry/revision contracts.

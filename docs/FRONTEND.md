@@ -27,7 +27,7 @@ tests/                       Playwright, auth, and database tests
 
 The public routes currently import fixture data. They do not silently fall back from a database failure because they do not query the database yet. The pending catalog integration owns server-side reads, controlled search/pagination, and distinct missing-config, empty-database, outage, and explicitly selected demo states. Do not document or build an interface for that work until its owner lands it.
 
-The review composer saves to `student-rankz-pending-reviews` in `localStorage`. These drafts are private to the browser, are not read back into the public UI, and do not alter scores or review counts. Server-side private drafts require the auth and application-identity work described in [ARCHITECTURE.md](./ARCHITECTURE.md).
+The review composer saves to `student-rankz-pending-reviews` in `localStorage`. These drafts are private to the browser, are not read back into the public UI, and do not alter scores or review counts. The account draft manager uses the private HTTP API. Database catalog pages will select the server composer by passing database university and target IDs. See [PRIVATE-DRAFT-HTTP.md](./PRIVATE-DRAFT-HTTP.md).
 
 The compare list uses `student-rankz-compare`; the theme uses `theme`. The SSR-safe local-storage hook reads browser state only after hydration.
 

@@ -34,6 +34,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120 * 1000,
     env: {
+      APP_ORIGIN: "",
       DATABASE_URL: "",
       DATABASE_DIRECT_URL: "",
       NEON_AUTH_BASE_URL: "",

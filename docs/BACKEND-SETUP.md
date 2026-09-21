@@ -11,6 +11,7 @@ Copy `.env.example` to `.env` for the database scripts. Next.js also supports `.
 | `DATABASE_URL` | app and migration fallback | Pooled application connection |
 | `DATABASE_DIRECT_URL` | migration tooling | Preferred direct migration connection |
 | `TEST_DATABASE_URL` | `npm run test:db` | Ephemeral or local PostgreSQL test connection |
+| `APP_ORIGIN` | private draft mutations | Exact browser origin, no path/trailing slash |
 | `NEON_AUTH_BASE_URL` | managed auth | Exact provider endpoint for the selected branch |
 | `NEON_AUTH_COOKIE_SECRET` | managed auth | Random server-only cookie secret, at least 32 characters |
 
@@ -27,7 +28,7 @@ SEED_SCOPE=development npm run db:seed -- --yes
 
 `DATABASE_DIRECT_URL` takes precedence for migrations, then `DATABASE_URL`. The seed requires both an explicit `SEED_SCOPE` of `development` or `demo` and `--yes`. Verify the physical target yourself: a connection string cannot prove which Neon branch it names. The seed is repeatable, fictional, and never runs automatically.
 
-The schema covers universities, programmes, courses, programme-course status, dated offerings, instructors, and offering-instructor links. Affiliation, application identity, private drafts, reviews, ratings, and moderation are separate pending work.
+The schema covers universities, programmes, courses, programme-course status, dated offerings, instructors, and offering-instructor links. Private drafts are included in the next ordered migration. Affiliation, application identity, public reviews, ratings, and moderation remain separate pending work. See [PRIVATE-DRAFT-HTTP.md](./PRIVATE-DRAFT-HTTP.md).
 
 ## Neon branch isolation
 

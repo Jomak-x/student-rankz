@@ -32,12 +32,14 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-    env:
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:${{ job.services.postgres.ports[5432] }}/postgres
-      # Inert value for the drizzle-kit CLI check only; never a real secret.
-      DATABASE_URL: postgres://postgres:postgres@localhost:${{ job.services.postgres.ports[5432] }}/postgres
-
     steps:
+      - name: Configure isolated PostgreSQL URLs
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${POSTGRES_PORT}/postgres" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:${POSTGRES_PORT}/postgres" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -56,8 +58,8 @@ jobs:
       - name: Affiliation service tests when present
         run: npm run test:affiliation --if-present
 
-      - name: Private draft service tests when present
-        run: npm run test:drafts --if-present
+      - name: Private draft service tests
+        run: npm run test:drafts
 
       - name: Verify committed migrations apply via drizzle-kit
         run: npx drizzle-kit migrate

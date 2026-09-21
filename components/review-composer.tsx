@@ -1,5 +1,6 @@
 "use client";
 
+import { ServerReviewComposer } from "./server-review-composer";
 import React, { useState } from "react";
 import { Star, Save } from "lucide-react";
 import { Button } from "./ui/button";
@@ -23,9 +24,16 @@ interface ReviewComposerProps {
   targetType: PendingReview["targetType"];
   targetId: string;
   targetName: string;
+  /** Database university ID opts into private server drafts; fixtures omit it. */
+  universityId?: string;
 }
 
-export function ReviewComposer({ targetType, targetId, targetName }: ReviewComposerProps) {
+export function ReviewComposer(props: ReviewComposerProps) {
+  if (props.universityId) return <ServerReviewComposer {...props} universityId={props.universityId} />;
+  return <LocalDemoComposer {...props} />;
+}
+
+function LocalDemoComposer({ targetType, targetId, targetName }: ReviewComposerProps) {
   const [open, setOpen] = useState(false);
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);

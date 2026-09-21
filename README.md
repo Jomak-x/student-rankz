@@ -1,6 +1,6 @@
 # Student Rankz
 
-Student Rankz is a Next.js prototype for university, course, and instructor student-experience reviews. The public UI is still a fixture demo: scores and reviews are illustrative sample data, and the review composer stores drafts in the browser only. Database migrations, an explicit synthetic directory seed, and managed authentication are available as separately configured backend slices; the public catalog and review flows have not yet been wired to them.
+Student Rankz is a Next.js prototype for university, course, and instructor student-experience reviews. The public UI is still a fixture demo: scores and reviews are illustrative sample data, and the review composer stores drafts in the browser only. Database migrations, an explicit synthetic directory seed, and managed authentication are available as separately configured backend slices; the private draft HTTP API and account manager are now wired. Public catalog replacement is pending.
 
 ## Prerequisites
 
@@ -28,6 +28,7 @@ The demo runs without service credentials. Copy `.env.example` to `.env` for dat
 | `npm run typecheck` | Run TypeScript without emitting files |
 | `npm test` | Run the Playwright smoke suite; defaults to port 3001 |
 | `npm run test:auth` | Run offline managed-auth tests |
+| `npm run test:drafts` | Run private draft service and ownership tests |
 | `npm run test:db` | Run database migration, constraint, seed, and configuration tests |
 | `npm run db:migrate` | Apply committed Drizzle migrations using `DATABASE_DIRECT_URL`, then `DATABASE_URL` |
 | `npm run db:seed -- --yes` | Explicitly seed a development or demo database when `SEED_SCOPE` is set |
@@ -38,12 +39,12 @@ The public catalog routes are currently backed by `lib/demo-data.ts` and remain 
 
 `/`, `/universities`, `/universities/[id]`, `/courses`, `/courses/[id]`, `/instructors/[id]`, `/rankings`, and `/compare`.
 
-`/sign-in`, `/sign-up`, and `/account` are the managed-auth slice. They fail closed and show an unavailable state when the provider is not configured. An authenticated provider identity does not establish affiliation, enrollment, review ownership, or publication permission.
+`/sign-in`, `/sign-up`, `/account`, and `/account/drafts` are the managed-auth slice. They fail closed and show an unavailable state when the provider is not configured. An authenticated provider identity does not establish affiliation, enrollment, review ownership, or publication permission.
 
 ## Current limits
 
 - The public catalog and rankings do not read the database yet. Database-backed reads, explicit empty/error/demo states, and deployment wiring are pending integration work.
-- The review composer writes private drafts to `localStorage`. It does not send, publish, moderate, or count reviews.
+- Fixture pages still use the labelled local demo composer. The server composer is ready for database target IDs; `/account/drafts` manages server-owned private drafts. Neither path publishes or changes ratings.
 - There is no public posting, moderation gateway, score aggregation service, admin/reporting flow, or live mail delivery.
 - The synthetic database seed is opt-in and contains fictional institutions. It never runs during build, migration, or deploy.
 
@@ -52,3 +53,5 @@ See [docs/INTEGRATION.md](docs/INTEGRATION.md) for the merge and configuration c
 ## CI
 
 Frontend CI runs lint, typecheck, offline auth tests, build, and Playwright on its default isolated port 3001. The separate Backend workflow runs database tests and migration/seed safety checks against PostgreSQL with a random mapped host port. Neither workflow provisions services or deploys the application. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md).
+
+Private draft setup and HTTP contract: [docs/PRIVATE-DRAFT-HTTP.md](docs/PRIVATE-DRAFT-HTTP.md). Set `APP_ORIGIN` to the exact application origin for mutations.
