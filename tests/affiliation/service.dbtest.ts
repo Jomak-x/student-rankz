@@ -76,6 +76,48 @@ test("initiate: rejects path in domain (path stripping attack)", async () => {
   }
 });
 
+test("initiate: rejects backslash in domain (URL normalization attack)", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    assert.deepEqual(
+      await service.initiate("sub|1", `user@${DOMAINS.westhavenStudent}\\`),
+      { ok: false, error: "INVALID_EMAIL" },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("initiate: rejects underscore in domain label", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    assert.deepEqual(
+      await service.initiate("sub|1", "user@student_mail.westhaven.nl"),
+      { ok: false, error: "INVALID_EMAIL" },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("initiate: rejects intermediate label ending with hyphen", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    assert.deepEqual(
+      await service.initiate("sub|1", "user@student-.westhaven.nl"),
+      { ok: false, error: "INVALID_EMAIL" },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
 test("initiate: rejects percent-encoded domain", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
@@ -332,6 +374,55 @@ test("consume: HMAC is bound to principal — wrong principal cannot use correct
   }
 });
 
+test("consume: HMAC context-binding — deterministic same-code transplanted to different principal", async () => {
+  // Proves context binding by transplanting the exact stored HMAC from one
+  // account's row to another's.  If the HMAC were not context-bound, the
+  // transplanted HMAC would verify for the second principal.
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const { service } = makeService(db, transport);
+
+    // Alice initiates; capture her code.
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const code = transport.sent[0].code;
+
+    // Read Alice's HMAC from the DB.
+    const [aliceRow] = await db.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+    assert.ok(aliceRow.codeHmac, "Alice must have a stored HMAC");
+
+    // Bob initiates the same email/university — gets a different HMAC context.
+    await service.initiate("sub|bob", `bob@${DOMAINS.westhavenStudent}`);
+
+    // Transplant Alice's HMAC + challenge metadata into Bob's row.
+    await db.update(accountVerifications).set({
+      codeHmac: aliceRow.codeHmac,
+      codeExpiresAt: aliceRow.codeExpiresAt,
+      challengeId: aliceRow.challengeId,
+    }).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|bob"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+
+    // Bob tries Alice's exact code+HMAC — must fail because HMAC binds to principal.
+    const result = await service.consume("sub|bob", `bob@${DOMAINS.westhavenStudent}`, code);
+    assert.ok(!result.ok);
+    assert.equal(result.error, "INVALID_CODE");
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
 test("consume: HMAC is bound to university — same code at different university fails", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
@@ -348,6 +439,47 @@ test("consume: HMAC is bound to university — same code at different university
 
     // Try to use Westhaven's code for Ostbrück — universityId differs in HMAC
     const result = await service.consume("sub|alice", `alice@${DOMAINS.ostbruckStudent}`, code);
+    assert.ok(!result.ok);
+    assert.equal(result.error, "INVALID_CODE");
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("consume: HMAC context-binding — deterministic same-code transplanted to different university", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const { service } = makeService(db, transport);
+
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const westhavenCode = transport.sent[0].code;
+
+    const [westhavenRow] = await db.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+
+    await service.initiate("sub|alice", `alice@${DOMAINS.ostbruckStudent}`);
+
+    // Transplant Westhaven HMAC into Ostbrück row with same code.
+    await db.update(accountVerifications).set({
+      codeHmac: westhavenRow.codeHmac,
+      codeExpiresAt: westhavenRow.codeExpiresAt,
+      challengeId: westhavenRow.challengeId,
+    }).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.ostbruck),
+      ),
+    );
+
+    const result = await service.consume("sub|alice", `alice@${DOMAINS.ostbruckStudent}`, westhavenCode);
     assert.ok(!result.ok);
     assert.equal(result.error, "INVALID_CODE");
   } finally {
@@ -510,6 +642,45 @@ test("initiate: per-email rate-limits cross-account sends", async () => {
     // Third account trying the same address hits the per-email limit
     const r3 = await service.initiate("sub|alice3", `alice@${DOMAINS.westhavenStudent}`);
     assert.deepEqual(r3, { ok: false, error: "RATE_LIMITED" });
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+// ── rate limiting: expired challenges release capacity ───────────────────
+
+test("initiate: expired cross-account challenges do not permanently block email", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const service = new AffiliationService({
+      db,
+      transport,
+      hmacSecret: SECRET,
+      maxSendsPerHour: 10,
+      maxSendsPerEmailPerHour: 1,
+    });
+
+    // Insert an old challenge row that has delivery_state='sent' but was
+    // updated > 1 hour ago — simulates an abandoned request.
+    const pastHour = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await db.insert(accountVerifications).values({
+      accountSubject: "sub|old-account",
+      universityId: UNIVERSITIES.westhaven,
+      emailAddress: `alice@${DOMAINS.westhavenStudent}`,
+      deliveryState: "sent",
+      codeHmac: "deadbeef".repeat(8),
+      codeExpiresAt: pastHour,
+      sendWindowStartsAt: pastHour,
+      updatedAt: pastHour,
+      sendCount: 1,
+    });
+
+    // A new account should NOT be blocked by the stale row.
+    const result = await service.initiate("sub|new-account", `alice@${DOMAINS.westhavenStudent}`);
+    assert.ok(result.ok, `Stale row should not block: ${JSON.stringify(result)}`);
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }

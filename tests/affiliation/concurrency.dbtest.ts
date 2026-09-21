@@ -203,6 +203,77 @@ test("concurrency: A-fail cleanup does not clobber concurrent B-success challeng
   }
 });
 
+// ── Concurrent cross-account initiate to same email (advisory lock) ──────────
+
+test("concurrency: concurrent cross-account initiates to same email respect per-email limit", async () => {
+  const { db: db1, databaseName, connectionString } = await createAffiliationTestDb();
+  const db2 = makeSecondDb(connectionString);
+  try {
+    await seedFixtures(db1);
+
+    const s1 = new AffiliationService({ db: db1, transport: new MockTransport(), hmacSecret: SECRET, maxSendsPerHour: 10, maxSendsPerEmailPerHour: 1 });
+    const s2 = new AffiliationService({ db: db2, transport: new MockTransport(), hmacSecret: SECRET, maxSendsPerHour: 10, maxSendsPerEmailPerHour: 1 });
+
+    const [r1, r2] = await Promise.all([
+      s1.initiate("sub|attacker1", `victim@${DOMAINS.westhavenStudent}`),
+      s2.initiate("sub|attacker2", `victim@${DOMAINS.westhavenStudent}`),
+    ]);
+
+    const successes = [r1, r2].filter((r) => r.ok).length;
+    const rateLimited = [r1, r2].filter((r) => !r.ok && r.error === "RATE_LIMITED").length;
+
+    assert.equal(successes, 1, `Expected exactly 1 success; got ${JSON.stringify([r1, r2])}`);
+    assert.equal(rateLimited, 1, `Expected exactly 1 RATE_LIMITED; got ${JSON.stringify([r1, r2])}`);
+  } finally {
+    await closeDb(db2);
+    await dropAffiliationTestDb(db1, databaseName);
+  }
+});
+
+// ── Initiate/consume race with DB state assertion ────────────────────────────
+
+test("concurrency: consume during pending delivery does not alter stored address", async () => {
+  const { db: db1, databaseName, connectionString } = await createAffiliationTestDb();
+  const db2 = makeSecondDb(connectionString);
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  try {
+    await seedFixtures(db1);
+
+    const controlled = new ControlledTransport();
+    const s1 = new AffiliationService({ db: db1, transport: controlled, hmacSecret: SECRET });
+    const s2 = new AffiliationService({ db: db2, transport: new MockTransport(), hmacSecret: SECRET });
+
+    const initiatePromise = s1.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    await controlled.sending;
+
+    const consumeResult = await s2.consume(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStudent}`,
+      "000000",
+    );
+    assert.deepEqual(consumeResult, { ok: false, error: "NOT_PENDING" });
+
+    controlled.succeed();
+    const initiateResult = await initiatePromise;
+    assert.ok(initiateResult.ok);
+
+    // Assert DB state: address is correct, delivery confirmed, not verified.
+    const [row] = await db1.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+    assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStudent}`);
+    assert.equal(row.deliveryState, "sent");
+    assert.equal(row.verified, false);
+  } finally {
+    await closeDb(db2);
+    await dropAffiliationTestDb(db1, databaseName);
+  }
+});
+
 // ── Consume-before-delivery then fail ────────────────────────────────────────
 
 test("concurrency: transport fails after challenge is written — verification is NOT granted", async () => {
