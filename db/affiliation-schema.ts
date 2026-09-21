@@ -32,20 +32,34 @@ export const universityDomains = pgTable(
     unique("university_domains_domain_unique").on(t.domain),
     index("university_domains_university_idx").on(t.universityId),
     index("university_domains_domain_active_idx").on(t.domain, t.active),
-    // Normalized domains must look like multi-label hostnames: at least one dot,
-    // lowercase alphanumeric labels, hyphens allowed mid-label.
+    // Strict domain format:
+    //   • Each label starts and ends with an alnum character; hyphens only inside.
+    //   • At least two labels (dot required).
+    //   • All lowercase alphanumeric — service normalizes before insert.
+    //   • Pure-IPv4 addresses rejected by the second sub-expression.
+    // Note: `\\.` inside a JS template literal produces `\.` in the SQL string,
+    // which is a literal-dot match in PostgreSQL POSIX regex.
     check(
       "university_domains_domain_format_check",
-      sql`${t.domain} ~ '^[a-z0-9][a-z0-9\-]*(\.[a-z0-9][a-z0-9\-]*)+$'`,
+      sql`${t.domain} ~ '^([a-z0-9]([a-z0-9-]*[a-z0-9])?)(\\.([a-z0-9]([a-z0-9-]*[a-z0-9])?))+$'
+          AND ${t.domain} !~ '^[0-9]+(\\.[0-9]+){3}$'`,
     ),
   ],
 );
 
 // Per-account, per-university verification state.
 //
-// Bound to a specific email address under the account: mail-control, not
-// enrollment. Resend invalidates the previous code. The HMAC is cleared on
-// successful consume and on send failure so no stale secret material lingers.
+// One row per (account_subject, university_id).  The challenge lifecycle uses
+// three fields that work together atomically:
+//
+//   challenge_id    — UUID regenerated on every initiate; scopes failure cleanup.
+//   code_hmac       — HMAC-SHA256 of (subject ‖ universityId ‖ email ‖ code).
+//   delivery_state  — 'pending' while email is in-flight; 'sent' once confirmed.
+//
+// consume() only accepts a challenge when delivery_state = 'sent', preventing
+// consumption before the email is confirmed delivered.  The failure-cleanup
+// UPDATE uses WHERE challenge_id = X AND delivery_state = 'pending', so it
+// cannot clobber a newer challenge written by a concurrent resend.
 export const accountVerifications = pgTable(
   "account_verifications",
   {
@@ -57,13 +71,23 @@ export const accountVerifications = pgTable(
       .notNull()
       .references(() => universities.id, { onDelete: "cascade" }),
     // Specific email address being verified for this account+university pair.
+    // Immutable once verified=true (initiate blocks on the FOR UPDATE lock and
+    // returns ALREADY_VERIFIED before touching the row).
     emailAddress: text().notNull(),
-    // HMAC-SHA256 hex of the current verification code; null when none is pending.
+    // Per-challenge identity.  Regenerated on every initiate; used to scope
+    // the delivery confirmation and failure-cleanup UPDATEs.
+    challengeId: uuid(),
+    // 'pending': HMAC written, email not yet confirmed sent.
+    // 'sent':    email confirmed delivered; consume() may proceed.
+    // null:      no active challenge (post-consume, post-failure, or fresh row).
+    deliveryState: text(),
+    // HMAC-SHA256 hex of (subject ‖ universityId ‖ email ‖ code).
+    // null when no challenge is active.
     codeHmac: text(),
     codeExpiresAt: timestamp({ withTimezone: true }),
-    // Consecutive failed consume attempts on the current code.
+    // Consecutive failed consume attempts on the current challenge.
     attemptCount: smallint().notNull().default(0),
-    // Number of codes sent within the current rolling hourly send window.
+    // Codes sent within the current rolling hourly send window (per account).
     sendCount: smallint().notNull().default(0),
     sendWindowStartsAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     verified: boolean().notNull().default(false),
@@ -78,6 +102,11 @@ export const accountVerifications = pgTable(
     ),
     index("account_verifications_subject_idx").on(t.accountSubject),
     index("account_verifications_university_idx").on(t.universityId),
+    // Partial index for per-email throttle lookups (best-effort).
+    index("account_verifications_email_delivery_idx").on(
+      t.emailAddress,
+      t.deliveryState,
+    ),
     check(
       "account_verifications_attempt_count_check",
       sql`${t.attemptCount} >= 0`,
@@ -85,6 +114,10 @@ export const accountVerifications = pgTable(
     check(
       "account_verifications_send_count_check",
       sql`${t.sendCount} >= 0`,
+    ),
+    check(
+      "account_verifications_delivery_state_check",
+      sql`${t.deliveryState} IS NULL OR ${t.deliveryState} IN ('pending', 'sent')`,
     ),
   ],
 );

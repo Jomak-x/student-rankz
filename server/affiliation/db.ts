@@ -22,19 +22,19 @@ import * as directorySchema from "@/db/schema";
 // On Vercel and Node 22+, the global WebSocket is available automatically.
 //
 // Required environment variable: DATABASE_URL (pooled Neon connection string).
-// Optional: call neonConfig.webSocketConstructor = ws for Node < 22.
 
 export { neonConfig };
 
 const combinedSchema = { ...directorySchema, ...affiliationSchema };
 
-export type AffiliationProdDb = ReturnType<typeof createAffiliationDb>;
+type AffiliationDbInstance = ReturnType<typeof drizzle<typeof combinedSchema>>;
+export type AffiliationProdDb = AffiliationDbInstance;
 
-let cached: AffiliationProdDb | undefined;
+let cached: { db: AffiliationDbInstance; pool: Pool } | undefined;
 
 export function createAffiliationDb(
   connectionString?: string,
-): ReturnType<typeof drizzle<typeof combinedSchema>> {
+): { db: ReturnType<typeof drizzle<typeof combinedSchema>>; pool: Pool } {
   const url = connectionString ?? process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
@@ -43,13 +43,26 @@ export function createAffiliationDb(
     );
   }
   const pool = new Pool({ connectionString: url });
-  return drizzle(pool, { schema: combinedSchema, casing: "snake_case" });
+  const db = drizzle(pool, { schema: combinedSchema, casing: "snake_case" });
+  return { db, pool };
 }
 
-/** Lazy singleton for the affiliation production DB. */
+/** Lazy singleton — creates the pool once and reuses it across requests. */
 export function getAffiliationDb(): AffiliationProdDb {
   if (!cached) {
     cached = createAffiliationDb();
   }
-  return cached;
+  return (cached as NonNullable<typeof cached>).db;
+}
+
+/**
+ * Close the underlying WebSocket pool for the singleton.
+ * Call this in graceful-shutdown handlers when running in a long-lived Node.js
+ * process.  Safe to call multiple times; subsequent calls are no-ops.
+ */
+export async function closeAffiliationDb(): Promise<void> {
+  if (cached) {
+    await cached.pool.end();
+    cached = undefined;
+  }
 }
