@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:drafts": "node --import tsx --test tests/drafts/migration.dbtest.ts tests/drafts/transport.dbtest.ts tests/drafts/service.dbtest.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
