@@ -8,13 +8,14 @@ The directory foundation is a typed PostgreSQL schema with Drizzle ORM. The appl
 
 ```
 db/schema.ts        Drizzle table definitions (single source of truth)
+db/config.ts        Migration connection resolution (direct -> pooled -> empty)
 db/seed-data.ts     Synthetic dataset: fictional institutions only
 db/seed.ts          Repeatable seedDatabase() (upsert-based)
 db/seed-cli.ts      Explicitly opt-in CLI wrapper (npm run db:seed)
 server/db.ts        Server-only client, lazy config validation
 drizzle/            Generated SQL migrations + snapshots (committed)
 drizzle.config.ts   drizzle-kit configuration
-tests/db/           Migration, constraint and seed tests (node:test)
+tests/db/           Migration, constraint, seed, config, CLI and helper-cleanup tests (node:test)
 ```
 
 ## Schema (implemented)
@@ -63,12 +64,14 @@ const rows = await db.select().from(universities);
 ```bash
 npm install                                   # deps (drizzle-orm, @neondatabase/serverless, server-only, drizzle-kit, pg, tsx)
 
-npm run test:db                               # migration + constraint + seed tests on an ephemeral Postgres
+npm run test:db                               # migration, constraint, seed, config, seed-CLI and helper-cleanup tests on an ephemeral Postgres
 TEST_DATABASE_URL=postgres://... npm run test:db   # point tests at another admin-capable Postgres
 
 npm run db:generate                           # diff db/schema.ts -> drizzle/*.sql (no DB needed)
 DATABASE_URL=postgres://... npm run db:migrate    # apply committed migrations
 ```
+
+Migration connection resolution: `DATABASE_DIRECT_URL` is preferred; when it is unset or blank, migration commands fall back to `DATABASE_URL` (convenient for local/CI single-connection setups). Values are never logged.
 
 Local ephemeral Postgres for tests (any Postgres works; `TEST_DATABASE_URL` must be admin-capable):
 
@@ -90,7 +93,7 @@ export SEED_SCOPE=development   # or "demo": declares the operator's intended ta
 npm run db:seed -- --yes        # explicit confirmation flag
 ```
 
-Without both, the CLI refuses and exits. The script cannot verify which physical database or hosted branch a `DATABASE_URL` points at, and does not pretend to — `SEED_SCOPE` is an operator statement, not a URL property. **Never seed a production database**: production (`main`) must contain only real records or be honestly empty, and must never receive synthetic rows.
+Without both, the CLI refuses and exits. The CLI loads the project `.env` file automatically (copy `.env.example` to `.env` and fill it in); exported environment variables take precedence over `.env` values (Node semantics). The script cannot verify which physical database or hosted branch a `DATABASE_URL` points at, and does not pretend to — `SEED_SCOPE` is an operator statement, not a URL property. **Never seed a production database**: production (`main`) must contain only real records or be honestly empty, and must never receive synthetic rows.
 
 ## Environment (implemented placeholders)
 

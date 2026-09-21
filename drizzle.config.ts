@@ -1,8 +1,12 @@
 import { defineConfig } from "drizzle-kit";
 
-// drizzle-kit configuration. DATABASE_URL is only required for commands that
-// connect to a database (push, migrate, studio, pull); `generate` works
-// without one. Local .env is loaded when present (Node >= 20.12).
+import { resolveMigrationUrl } from "./db/config";
+
+// drizzle-kit configuration. A database connection is only required for
+// commands that connect (push, migrate, studio, pull); `generate` works
+// without one. Connection resolution: DATABASE_DIRECT_URL preferred, falling
+// back to DATABASE_URL (see db/config.ts). Local .env is loaded when present
+// (Node >= 20.12); exported environment variables take precedence over .env.
 try {
   process.loadEnvFile();
 } catch {
@@ -15,6 +19,6 @@ export default defineConfig({
   dialect: "postgresql",
   casing: "snake_case",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "",
+    url: resolveMigrationUrl(),
   },
 });
