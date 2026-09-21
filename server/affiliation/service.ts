@@ -38,8 +38,8 @@ export interface AffiliationServiceConfig {
   /** Maximum codes sent per account+university per hour. Default: 3. */
   maxSendsPerHour?: number;
   /**
-   * Maximum active (pending or sent) challenges to the same email address
-   * across ALL accounts (best-effort anti-spam).  Default: 5.
+   * Maximum send reservations per hour to the same email address across ALL
+   * accounts, including uncertain transport outcomes. Default: 5.
    */
   maxSendsPerEmailPerHour?: number;
 }
@@ -139,7 +139,7 @@ export class AffiliationService {
         sql`SELECT pg_advisory_xact_lock(hashtext(${normalizedEmail}))`,
       );
 
-      // Prune expired log entries for this recipient (bounded cleanup).
+      // Opportunistic recipient pruning; cleanup.ts also sweeps abandoned addresses.
       await (tx as AffiliationDb)
         .delete(recipientSendLog)
         .where(
@@ -221,8 +221,8 @@ export class AffiliationService {
         .where(eq(accountVerifications.id, record.id));
 
       // Record the send in the immutable recipient log.  This entry survives
-      // address changes and challenge overwrites; it is only removed on send
-      // failure (scoped by challengeId) or by time-based pruning.
+      // address changes, challenge overwrites, and transport errors. Only
+      // time-based pruning may release recipient capacity.
       await (tx as AffiliationDb).insert(recipientSendLog).values({
         recipientEmail: normalizedEmail,
         challengeId,
@@ -241,11 +241,9 @@ export class AffiliationService {
         universityName: uni.name,
       });
     } catch {
-      // Scoped failure cleanup: remove the send-log reservation for THIS
-      // challenge, then clear the challenge from the verification row.
-      await this.db
-        .delete(recipientSendLog)
-        .where(eq(recipientSendLog.challengeId, challengeId));
+      // The provider may accept the email and then fail to acknowledge it.
+      // Keep recipient capacity consumed until expiry; invalidate only THIS
+      // pending challenge so an uncertain delivery cannot grant verification.
       await this.db
         .update(accountVerifications)
         .set({

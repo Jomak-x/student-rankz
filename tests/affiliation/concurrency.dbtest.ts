@@ -39,6 +39,55 @@ async function closeDb(db: TestDb): Promise<void> {
   await db.$client.end();
 }
 
+async function waitForAdvisoryLockWaiter(
+  db: TestDb,
+  classId: number,
+  objectId: number,
+): Promise<number> {
+  const timeoutAt = Date.now() + 5_000;
+
+  while (Date.now() < timeoutAt) {
+    const result = await db.$client.query<{ pid: number }>(
+      `SELECT pid
+       FROM pg_locks
+       WHERE locktype = 'advisory'
+         AND database = (
+           SELECT oid FROM pg_database WHERE datname = current_database()
+         )
+         AND classid = $1
+         AND objid = $2
+         AND objsubid = 2
+         AND NOT granted
+       LIMIT 1`,
+      [classId, objectId],
+    );
+    if (result.rows[0]) return result.rows[0].pid;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  throw new Error("Timed out waiting for consume to reach the advisory-lock barrier");
+}
+
+async function waitForBlockedByPid(db: TestDb, blockerPid: number): Promise<void> {
+  const timeoutAt = Date.now() + 5_000;
+
+  while (Date.now() < timeoutAt) {
+    const result = await db.$client.query<{ waiting: boolean }>(
+      `SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND $1 = ANY(pg_blocking_pids(pid))
+      ) AS waiting`,
+      [blockerPid],
+    );
+    if (result.rows[0]?.waiting) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  throw new Error("Timed out waiting for initiate to contend on the consume row lock");
+}
+
 // ── Concurrent first initiations ─────────────────────────────────────────────
 
 test("concurrency: two concurrent first-initiations serialize; both succeed or one gets RATE_LIMITED", async () => {
@@ -389,20 +438,20 @@ test("concurrency: verified address cannot be changed by a concurrent initiate f
 
 // ── Concurrent consume vs address-changing initiate ─────────────────────────
 
-test("concurrency: consume grants verification while concurrent initiate tries address change — verified address is stored", async () => {
-  // Sequence with real concurrent barrier:
-  //   1. Alice initiates for student email → challenge created, delivery confirmed.
-  //   2. Concurrently: Alice consumes the code AND re-initiates with staff email.
-  //   3. If consume wins the FOR UPDATE lock first, the row becomes verified=true
-  //      with the student email. The initiate then sees ALREADY_VERIFIED.
-  //   4. If initiate wins first, it overwrites the challenge — consume then
-  //      returns INVALID_CODE (stale challenge). Either way, the DB row must be
-  //      internally consistent.
-  //   5. Assert the stored emailAddress matches verified or the active challenge.
+test("concurrency: consume holding the row lock verifies only its original address", async () => {
+  // A test-only trigger pauses the successful consume UPDATE while its
+  // transaction still owns the verification row lock. The address-changing
+  // initiate is then started before the consume is released. This fixes the
+  // ordering without sleeps or relying on which Promise the scheduler runs first.
   const { db: db1, databaseName, connectionString } = await createAffiliationTestDb();
   const db2 = makeSecondDb(connectionString);
   const { accountVerifications } = await import("@/db/affiliation-schema");
   const { eq, and } = await import("drizzle-orm");
+  const barrierClassId = 52_177;
+  const barrierObjectId = 1;
+  const barrierClient = await db1.$client.connect();
+  let consumePromise: ReturnType<AffiliationService["consume"]> | undefined;
+  let initiatePromise: ReturnType<AffiliationService["initiate"]> | undefined;
   try {
     await seedFixtures(db1);
 
@@ -413,13 +462,55 @@ test("concurrency: consume grants verification while concurrent initiate tries a
     await s1.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
 
-    // Fire both concurrently — real FOR UPDATE serialization.
+    await barrierClient.query("SELECT pg_advisory_lock($1, $2)", [
+      barrierClassId,
+      barrierObjectId,
+    ]);
+    await db1.$client.query(`
+      CREATE FUNCTION test_pause_successful_consume() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.verified AND NOT OLD.verified THEN
+          PERFORM pg_advisory_xact_lock(${barrierClassId}, ${barrierObjectId});
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      CREATE TRIGGER test_pause_successful_consume
+      BEFORE UPDATE ON account_verifications
+      FOR EACH ROW EXECUTE FUNCTION test_pause_successful_consume();
+    `);
+
+    consumePromise = s1.consume(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStudent}`,
+      code,
+    );
+    const consumePid = await waitForAdvisoryLockWaiter(
+      db1,
+      barrierClassId,
+      barrierObjectId,
+    );
+
+    // consume owns the row lock here; initiate must observe verified=true after
+    // the barrier is released and must never replace the verified address.
+    initiatePromise = s2.initiate(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStaff}`,
+    );
+    await waitForBlockedByPid(db1, consumePid);
+    await barrierClient.query("SELECT pg_advisory_unlock($1, $2)", [
+      barrierClassId,
+      barrierObjectId,
+    ]);
     const [consumeResult, initiateResult] = await Promise.all([
-      s1.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code),
-      s2.initiate("sub|alice", `alice@${DOMAINS.westhavenStaff}`),
+      consumePromise,
+      initiatePromise,
     ]);
 
-    // Read the row's final state.
+    assert.ok(consumeResult.ok, `Consume should succeed: ${JSON.stringify(consumeResult)}`);
+    assert.deepEqual(initiateResult, { ok: false, error: "ALREADY_VERIFIED" });
+
     const [row] = await db1.select().from(accountVerifications).where(
       and(
         eq(accountVerifications.accountSubject, "sub|alice"),
@@ -427,19 +518,81 @@ test("concurrency: consume grants verification while concurrent initiate tries a
       ),
     );
 
-    if (consumeResult.ok) {
-      // Consume won — row must be verified with the student address.
-      assert.equal(row.verified, true);
-      assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStudent}`);
-      assert.deepEqual(initiateResult, { ok: false, error: "ALREADY_VERIFIED" });
-    } else {
-      // Initiate won — the challenge was overwritten; consume got stale HMAC.
-      assert.equal(consumeResult.error, "INVALID_CODE");
-      assert.ok(initiateResult.ok);
-      assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStaff}`);
-      assert.equal(row.verified, false);
-    }
+    assert.equal(row.verified, true);
+    assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStudent}`);
   } finally {
+    await barrierClient.query("SELECT pg_advisory_unlock($1, $2)", [
+      barrierClassId,
+      barrierObjectId,
+    ]);
+    const pending: Promise<unknown>[] = [];
+    if (consumePromise) pending.push(consumePromise);
+    if (initiatePromise) pending.push(initiatePromise);
+    await Promise.allSettled(pending);
+    barrierClient.release();
+    await closeDb(db2);
+    await dropAffiliationTestDb(db1, databaseName);
+  }
+});
+
+test("concurrency: address change reservation makes the old code not pending before send", async () => {
+  // ControlledTransport is the barrier after the staff-address reservation has
+  // committed and before delivery is acknowledged. The old student code is
+  // safe to reject as NOT_PENDING in this window; after confirmation it is an
+  // INVALID_CODE for the replacement challenge. Neither attempt may verify the
+  // newly stored staff address.
+  const { db: db1, databaseName, connectionString } = await createAffiliationTestDb();
+  const db2 = makeSecondDb(connectionString);
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  const { eq, and } = await import("drizzle-orm");
+  const replacementTransport = new ControlledTransport();
+  let initiatePromise: ReturnType<AffiliationService["initiate"]> | undefined;
+  try {
+    await seedFixtures(db1);
+
+    const originalTransport = new MockTransport();
+    const s1 = new AffiliationService({ db: db1, transport: originalTransport, hmacSecret: SECRET });
+    const s2 = new AffiliationService({ db: db2, transport: replacementTransport, hmacSecret: SECRET });
+
+    await s1.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const oldCode = originalTransport.sent[0].code;
+
+    initiatePromise = s2.initiate(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStaff}`,
+    );
+    await replacementTransport.sending;
+
+    const consumeDuringSend = await s1.consume(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStudent}`,
+      oldCode,
+    );
+    assert.deepEqual(consumeDuringSend, { ok: false, error: "NOT_PENDING" });
+
+    replacementTransport.succeed();
+    const initiateResult = await initiatePromise;
+    assert.ok(initiateResult.ok, `Replacement initiate should succeed: ${JSON.stringify(initiateResult)}`);
+
+    const consumeAfterSend = await s1.consume(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStudent}`,
+      oldCode,
+    );
+    assert.deepEqual(consumeAfterSend, { ok: false, error: "INVALID_CODE" });
+
+    const [row] = await db1.select().from(accountVerifications).where(
+      and(
+        eq(accountVerifications.accountSubject, "sub|alice"),
+        eq(accountVerifications.universityId, UNIVERSITIES.westhaven),
+      ),
+    );
+    assert.equal(row.verified, false);
+    assert.equal(row.emailAddress, `alice@${DOMAINS.westhavenStaff}`);
+    assert.equal(row.deliveryState, "sent");
+  } finally {
+    replacementTransport.succeed();
+    if (initiatePromise) await Promise.allSettled([initiatePromise]);
     await closeDb(db2);
     await dropAffiliationTestDb(db1, databaseName);
   }

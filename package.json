@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test:affiliation": "node --import tsx --test tests/affiliation/service.dbtest.ts",
+    "test:affiliation": "node --import tsx --test tests/affiliation/service.dbtest.ts tests/affiliation/concurrency.dbtest.ts tests/affiliation/cleanup.dbtest.ts",
     "db:migrate:feature": "tsx db/apply-feature-migrations.ts",
     "db:seed:demo": "tsx db/demo-ratings-seed-cli.ts",
     "test:catalog": "node --import tsx --test tests/catalog/queries.dbtest.ts tests/catalog/demo-ratings.dbtest.ts tests/catalog/privacy.dbtest.ts tests/catalog/demo-seed-cli.dbtest.ts",
@@ -20,7 +20,8 @@
     "db:seed": "tsx db/seed-cli.ts",
     "test:auth": "vitest run",
     "test:drafts": "node --import tsx --test tests/drafts/migration.dbtest.ts tests/drafts/transport.dbtest.ts tests/drafts/service.dbtest.ts",
-    "test:integration": "tsx scripts/test-integration.ts"
+    "test:integration": "tsx scripts/test-integration.ts",
+    "affiliation:cleanup": "tsx server/affiliation/cleanup-cli.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
