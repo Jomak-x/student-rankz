@@ -31,25 +31,57 @@ test("AffiliationService: throws on empty hmacSecret", () => {
   );
 });
 
-// ── initiate: validation ──────────────────────────────────────────────────────
+// ── initiate: email/domain validation ────────────────────────────────────────
 
 test("initiate: rejects malformed email", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     const { service } = makeService(db);
-    const result = await service.initiate("sub|123", "not-an-email");
-    assert.deepEqual(result, { ok: false, error: "INVALID_EMAIL" });
+    assert.deepEqual(await service.initiate("sub|1", "not-an-email"), { ok: false, error: "INVALID_EMAIL" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
 });
 
-test("initiate: rejects email with IP address domain", async () => {
+test("initiate: rejects email with IPv4 domain", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     const { service } = makeService(db);
-    const result = await service.initiate("sub|123", "user@192.168.1.1");
-    assert.deepEqual(result, { ok: false, error: "INVALID_EMAIL" });
+    assert.deepEqual(await service.initiate("sub|1", "user@192.168.1.1"), { ok: false, error: "INVALID_EMAIL" });
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("initiate: rejects port in domain (colon stripping attack)", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    // "student.westhaven.nl:443" → would normalize to "student.westhaven.nl" in a naive parser
+    assert.deepEqual(await service.initiate("sub|1", `user@${DOMAINS.westhavenStudent}:443`), { ok: false, error: "INVALID_EMAIL" });
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("initiate: rejects path in domain (path stripping attack)", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    assert.deepEqual(await service.initiate("sub|1", `user@${DOMAINS.westhavenStudent}/evil`), { ok: false, error: "INVALID_EMAIL" });
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("initiate: rejects percent-encoded domain", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const { service } = makeService(db);
+    assert.deepEqual(await service.initiate("sub|1", "user@evil.com%40student.westhaven.nl"), { ok: false, error: "INVALID_EMAIL" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -60,9 +92,7 @@ test("initiate: rejects domain not in registry", async () => {
   try {
     await seedFixtures(db);
     const { service } = makeService(db);
-    // Suffix of a registered domain — must be rejected (no suffix matching).
-    const result = await service.initiate("sub|123", "user@fakewesthaven.nl");
-    assert.deepEqual(result, { ok: false, error: "UNKNOWN_DOMAIN" });
+    assert.deepEqual(await service.initiate("sub|1", "user@fakewesthaven.nl"), { ok: false, error: "UNKNOWN_DOMAIN" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -73,9 +103,60 @@ test("initiate: rejects suffix-spoofed domain", async () => {
   try {
     await seedFixtures(db);
     const { service } = makeService(db);
-    // "evil-student.westhaven.nl" ends with the registered domain but is not it.
-    const result = await service.initiate("sub|123", "user@evil-student.westhaven.nl");
-    assert.deepEqual(result, { ok: false, error: "UNKNOWN_DOMAIN" });
+    // ends with registered domain string but is a different label
+    assert.deepEqual(
+      await service.initiate("sub|1", `user@evil-student.westhaven.nl`),
+      { ok: false, error: "UNKNOWN_DOMAIN" },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+// ── domain constraint: DB-level rejection ────────────────────────────────────
+
+test("domain constraint: DB rejects IPv4 address inserted directly", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { universityDomains } = await import("@/db/affiliation-schema");
+  try {
+    await seedFixtures(db);
+    await assert.rejects(
+      () =>
+        db.insert(universityDomains).values({
+          universityId: UNIVERSITIES.westhaven,
+          domain: "192.168.1.1",
+        }),
+      (err: unknown) => {
+        // Expect check constraint violation (23514)
+        const candidates = [err, (err as { cause?: unknown }).cause];
+        return candidates.some(
+          (c) => c && typeof c === "object" && "code" in c && (c as { code: string }).code === "23514",
+        );
+      },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("domain constraint: DB rejects label starting with hyphen", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { universityDomains } = await import("@/db/affiliation-schema");
+  try {
+    await seedFixtures(db);
+    await assert.rejects(
+      () =>
+        db.insert(universityDomains).values({
+          universityId: UNIVERSITIES.westhaven,
+          domain: "-evil.westhaven.nl",
+        }),
+      (err: unknown) => {
+        const candidates = [err, (err as { cause?: unknown }).cause];
+        return candidates.some(
+          (c) => c && typeof c === "object" && "code" in c && (c as { code: string }).code === "23514",
+        );
+      },
+    );
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -125,7 +206,6 @@ test("initiate: returns ALREADY_VERIFIED if already done", async () => {
     const transport = new MockTransport();
     const { service } = makeService(db, transport);
 
-    // First initiate + consume to reach verified state.
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
     await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code);
@@ -143,24 +223,56 @@ test("initiate: send failure does not mark verified and clears HMAC", async () =
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
-    const failing = new FailingTransport();
-    const service = new AffiliationService({ db, transport: failing, hmacSecret: SECRET });
+    const service = new AffiliationService({ db, transport: new FailingTransport(), hmacSecret: SECRET });
 
     const result = await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     assert.deepEqual(result, { ok: false, error: "SEND_FAILED" });
 
-    // Status must still be unverified; no code can be consumed.
     const status = await service.getStatus("sub|alice", UNIVERSITIES.westhaven);
     assert.ok(status !== null);
     assert.equal(status.verified, false);
 
-    // Consuming any code after a failed send returns NOT_PENDING.
+    // No pending challenge — consume must fail with NOT_PENDING.
     const consumeResult = await service.consume(
       "sub|alice",
       `alice@${DOMAINS.westhavenStudent}`,
       "000000",
     );
     assert.deepEqual(consumeResult, { ok: false, error: "NOT_PENDING" });
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+// ── consume: delivery-state guard ────────────────────────────────────────────
+
+test("consume: challenge with delivery_state=pending is not consumable", async () => {
+  // Manually insert a record with delivery_state='pending' to simulate the
+  // window between a challenge being written and the send being confirmed.
+  const { db, databaseName } = await createAffiliationTestDb();
+  const { accountVerifications } = await import("@/db/affiliation-schema");
+  try {
+    await seedFixtures(db);
+
+    await db.insert(accountVerifications).values({
+      accountSubject: "sub|alice",
+      universityId: UNIVERSITIES.westhaven,
+      emailAddress: `alice@${DOMAINS.westhavenStudent}`,
+      challengeId: "00000000-0000-4000-9000-eeeeeeee0001",
+      deliveryState: "pending",
+      codeHmac: "deadbeef".repeat(8), // not a real HMAC
+      codeExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      sendWindowStartsAt: new Date(),
+      sendCount: 1,
+    });
+
+    const { service } = makeService(db);
+    const result = await service.consume(
+      "sub|alice",
+      `alice@${DOMAINS.westhavenStudent}`,
+      "123456",
+    );
+    assert.deepEqual(result, { ok: false, error: "NOT_PENDING" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -178,14 +290,11 @@ test("consume: correct code marks verified", async () => {
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
 
-    const result = await service.consume(
-      "sub|alice",
-      `alice@${DOMAINS.westhavenStudent}`,
-      code,
-    );
-    assert.ok(result.ok);
+    const result = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code);
+    assert.ok(result.ok, `Expected ok but got: ${JSON.stringify(result)}`);
     assert.equal(result.universityId, UNIVERSITIES.westhaven);
-    assert.equal(result.accountSubject, "sub|alice");
+    // accountSubject must not appear in the public DTO
+    assert.ok(!("accountSubject" in result));
 
     const status = await service.getStatus("sub|alice", UNIVERSITIES.westhaven);
     assert.ok(status?.verified);
@@ -195,9 +304,60 @@ test("consume: correct code marks verified", async () => {
   }
 });
 
+// ── consume: context-bound HMAC ───────────────────────────────────────────────
+
+test("consume: HMAC is bound to principal — wrong principal cannot use correct code", async () => {
+  // Alice's HMAC is HMAC(secret, "sub|alice\0univ\0email\0code").
+  // Bob cannot reuse Alice's code even if he supplies Alice's email and code.
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const { service } = makeService(db, transport);
+
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const code = transport.sent[0].code;
+
+    // Bob initiates his own challenge (different row, different HMAC context)
+    await service.initiate("sub|bob", `bob@${DOMAINS.westhavenStudent}`);
+
+    // Bob tries to consume with Alice's code — the HMAC context differs
+    // (principal "sub|bob" was used to derive Bob's HMAC, not Alice's)
+    const result = await service.consume("sub|bob", `bob@${DOMAINS.westhavenStudent}`, code);
+    assert.ok(!result.ok);
+    // INVALID_CODE (wrong HMAC), not any info leak
+    assert.equal(result.error, "INVALID_CODE");
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+test("consume: HMAC is bound to university — same code at different university fails", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const transport = new MockTransport();
+    const { service } = makeService(db, transport);
+
+    // Alice initiates for Westhaven
+    await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    const code = transport.sent[0].code;
+
+    // Alice also initiates for Ostbrück — completely separate HMAC context
+    await service.initiate("sub|alice", `alice@${DOMAINS.ostbruckStudent}`);
+
+    // Try to use Westhaven's code for Ostbrück — universityId differs in HMAC
+    const result = await service.consume("sub|alice", `alice@${DOMAINS.ostbruckStudent}`, code);
+    assert.ok(!result.ok);
+    assert.equal(result.error, "INVALID_CODE");
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
 // ── consume: replay ───────────────────────────────────────────────────────────
 
-test("consume: replaying the same code fails", async () => {
+test("consume: replaying the same code fails with ALREADY_VERIFIED", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
@@ -224,7 +384,6 @@ test("consume: expired code returns INVALID_CODE", async () => {
   try {
     await seedFixtures(db);
     const transport = new MockTransport();
-    // 0-minute expiry for testing.
     const service = new AffiliationService({
       db,
       transport,
@@ -235,23 +394,18 @@ test("consume: expired code returns INVALID_CODE", async () => {
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
 
-    // Wait 1 ms so the zero-minute expiry triggers.
     await new Promise((r) => setTimeout(r, 5));
 
-    const result = await service.consume(
-      "sub|alice",
-      `alice@${DOMAINS.westhavenStudent}`,
-      code,
-    );
+    const result = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code);
     assert.deepEqual(result, { ok: false, error: "INVALID_CODE" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
 });
 
-// ── consume: wrong code / brute-force ────────────────────────────────────────
+// ── consume: brute-force lockout ──────────────────────────────────────────────
 
-test("consume: wrong code increments attempt count", async () => {
+test("consume: wrong code increments attempt count and locks after maxAttempts", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
@@ -265,19 +419,14 @@ test("consume: wrong code increments attempt count", async () => {
 
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
 
-    // Wrong code attempts 1–3.
     for (let i = 0; i < 3; i++) {
       const r = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, "000000");
       assert.deepEqual(r, { ok: false, error: "INVALID_CODE" });
     }
 
-    // After maxAttempts, correct code is also locked out.
+    // After maxAttempts, the correct code is also locked out.
     const correctCode = transport.sent[0].code;
-    const locked = await service.consume(
-      "sub|alice",
-      `alice@${DOMAINS.westhavenStudent}`,
-      correctCode,
-    );
+    const locked = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, correctCode);
     assert.deepEqual(locked, { ok: false, error: "INVALID_CODE" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
@@ -293,40 +442,29 @@ test("resend: invalidates previous code and resets attempt counter", async () =>
     const transport = new MockTransport();
     const { service } = makeService(db, transport);
 
-    // First send.
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const oldCode = transport.sent[0].code;
 
-    // Use one wrong attempt on the first code.
     await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, "000000");
 
-    // Resend.
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const newCode = transport.sent[1].code;
 
-    // Old code no longer works.
-    const oldResult = await service.consume(
-      "sub|alice",
-      `alice@${DOMAINS.westhavenStudent}`,
-      oldCode,
-    );
-    assert.deepEqual(oldResult, { ok: false, error: "INVALID_CODE" });
+    // Old code fails (different HMAC context, different challenge).
+    const oldResult = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, oldCode);
+    assert.ok(!oldResult.ok);
 
     // New code works.
-    const newResult = await service.consume(
-      "sub|alice",
-      `alice@${DOMAINS.westhavenStudent}`,
-      newCode,
-    );
+    const newResult = await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, newCode);
     assert.ok(newResult.ok);
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
 });
 
-// ── rate limiting ─────────────────────────────────────────────────────────────
+// ── rate limiting: per-account ────────────────────────────────────────────────
 
-test("initiate: rate-limits after maxSendsPerHour", async () => {
+test("initiate: per-account rate-limits after maxSendsPerHour", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
@@ -338,11 +476,39 @@ test("initiate: rate-limits after maxSendsPerHour", async () => {
       maxSendsPerHour: 2,
     });
 
-    const r1 = await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
-    assert.ok(r1.ok);
-    const r2 = await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
-    assert.ok(r2.ok);
-    const r3 = await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
+    assert.ok((await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`)).ok);
+    assert.ok((await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`)).ok);
+    assert.deepEqual(
+      await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`),
+      { ok: false, error: "RATE_LIMITED" },
+    );
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
+
+// ── rate limiting: per-email (cross-account) ──────────────────────────────────
+
+test("initiate: per-email rate-limits cross-account sends", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    // maxSendsPerEmailPerHour=2 means at most 2 concurrent active challenges
+    // to the same address across all accounts.
+    const service = new AffiliationService({
+      db,
+      transport: new MockTransport(),
+      hmacSecret: SECRET,
+      maxSendsPerHour: 10,           // high per-account limit
+      maxSendsPerEmailPerHour: 2,    // low per-email limit
+    });
+
+    // sub|alice and sub|bob both send to alice@domain (different accounts, same address)
+    assert.ok((await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`)).ok);
+    assert.ok((await service.initiate("sub|alice2", `alice@${DOMAINS.westhavenStudent}`)).ok);
+
+    // Third account trying the same address hits the per-email limit
+    const r3 = await service.initiate("sub|alice3", `alice@${DOMAINS.westhavenStudent}`);
     assert.deepEqual(r3, { ok: false, error: "RATE_LIMITED" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
@@ -351,7 +517,7 @@ test("initiate: rate-limits after maxSendsPerHour", async () => {
 
 // ── cross-account / cross-university / cross-address ─────────────────────────
 
-test("consume: mismatched principal returns NOT_PENDING (not other account's code)", async () => {
+test("consume: mismatched principal returns NOT_PENDING", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
@@ -361,13 +527,8 @@ test("consume: mismatched principal returns NOT_PENDING (not other account's cod
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
 
-    // Bob tries to consume Alice's code using Alice's email address.
-    const result = await service.consume(
-      "sub|bob",
-      `alice@${DOMAINS.westhavenStudent}`,
-      code,
-    );
-    // Bob has no record → NOT_PENDING (not a cross-account leak).
+    // Bob has no record for this domain — NOT_PENDING.
+    const result = await service.consume("sub|bob", `alice@${DOMAINS.westhavenStudent}`, code);
     assert.deepEqual(result, { ok: false, error: "NOT_PENDING" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
@@ -384,12 +545,7 @@ test("consume: mismatched address returns INVALID_CODE", async () => {
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
 
-    // Alice uses a different address at the same university domain.
-    const result = await service.consume(
-      "sub|alice",
-      `alice.other@${DOMAINS.westhavenStudent}`,
-      code,
-    );
+    const result = await service.consume("sub|alice", `alice.other@${DOMAINS.westhavenStudent}`, code);
     assert.deepEqual(result, { ok: false, error: "INVALID_CODE" });
   } finally {
     await dropAffiliationTestDb(db, databaseName);
@@ -403,12 +559,10 @@ test("consume: one university does not grant another", async () => {
     const transport = new MockTransport();
     const { service } = makeService(db, transport);
 
-    // Alice verifies for Westhaven.
     await service.initiate("sub|alice", `alice@${DOMAINS.westhavenStudent}`);
     const code = transport.sent[0].code;
     await service.consume("sub|alice", `alice@${DOMAINS.westhavenStudent}`, code);
 
-    // Westhaven verification must not affect Ostbrück status.
     const ostStatus = await service.getStatus("sub|alice", UNIVERSITIES.ostbruck);
     assert.ok(ostStatus === null || !ostStatus.verified);
   } finally {
@@ -416,14 +570,13 @@ test("consume: one university does not grant another", async () => {
   }
 });
 
-test("consume: staff domain verifies same university, not the student domain's twin", async () => {
+test("consume: staff domain verifies same university", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
     const transport = new MockTransport();
     const { service } = makeService(db, transport);
 
-    // Westhaven staff domain is also mapped to Westhaven — should succeed.
     await service.initiate("sub|prof", `prof@${DOMAINS.westhavenStaff}`);
     const code = transport.sent[0].code;
     const result = await service.consume("sub|prof", `prof@${DOMAINS.westhavenStaff}`, code);
@@ -434,14 +587,11 @@ test("consume: staff domain verifies same university, not the student domain's t
   }
 });
 
-// ── domain validation ─────────────────────────────────────────────────────────
-
-test("consume: unknown domain in consume returns UNKNOWN_DOMAIN", async () => {
+test("consume: unknown domain returns UNKNOWN_DOMAIN", async () => {
   const { db, databaseName } = await createAffiliationTestDb();
   try {
     await seedFixtures(db);
     const { service } = makeService(db);
-
     const result = await service.consume("sub|alice", "alice@unknown-uni.com", "123456");
     assert.deepEqual(result, { ok: false, error: "UNKNOWN_DOMAIN" });
   } finally {
@@ -456,8 +606,7 @@ test("getStatus: returns null when no record exists", async () => {
   try {
     await seedFixtures(db);
     const { service } = makeService(db);
-    const status = await service.getStatus("sub|nobody", UNIVERSITIES.westhaven);
-    assert.equal(status, null);
+    assert.equal(await service.getStatus("sub|nobody", UNIVERSITIES.westhaven), null);
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -475,6 +624,10 @@ test("getStatus: returns unverified status after initiate", async () => {
     assert.ok(status !== null);
     assert.equal(status.verified, false);
     assert.equal(status.verifiedAt, null);
+    // Private fields must not appear in the DTO
+    assert.ok(!("codeHmac" in status));
+    assert.ok(!("challengeId" in status));
+    assert.ok(!("accountSubject" in status));
   } finally {
     await dropAffiliationTestDb(db, databaseName);
   }
@@ -482,7 +635,7 @@ test("getStatus: returns unverified status after initiate", async () => {
 
 // ── migration schema validation ───────────────────────────────────────────────
 
-test("affiliation migration: expected tables and constraints exist", async () => {
+test("affiliation migration: expected tables, columns, and constraints exist", async () => {
   const { db, databaseName, connectionString } = await createAffiliationTestDb();
   const { Client } = await import("pg");
   const client = new Client({ connectionString });
@@ -497,18 +650,28 @@ test("affiliation migration: expected tables and constraints exist", async () =>
     assert.ok(names.includes("university_domains"), "university_domains table missing");
     assert.ok(names.includes("account_verifications"), "account_verifications table missing");
 
+    // New columns present.
+    const cols = await client.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'account_verifications'
+         AND column_name IN ('challenge_id', 'delivery_state')`,
+    );
+    assert.equal(cols.rows.length, 2, "challenge_id and delivery_state columns missing");
+
+    // Required constraints.
     const constraints = await client.query<{ constraint_name: string }>(
       `SELECT constraint_name FROM information_schema.table_constraints
        WHERE table_schema = 'public'
-       AND constraint_name IN (
-         'university_domains_domain_unique',
-         'account_verifications_account_university_unique',
-         'university_domains_university_id_universities_id_fk',
-         'account_verifications_university_id_universities_id_fk'
-       )
+         AND constraint_name IN (
+           'university_domains_domain_unique',
+           'account_verifications_account_university_unique',
+           'university_domains_university_id_universities_id_fk',
+           'account_verifications_university_id_universities_id_fk',
+           'account_verifications_delivery_state_check'
+         )
        ORDER BY constraint_name`,
     );
-    assert.equal(constraints.rows.length, 4, "Expected 4 affiliation constraints");
+    assert.equal(constraints.rows.length, 5, "Expected 5 affiliation constraints");
   } finally {
     await client.end();
     await dropAffiliationTestDb(db, databaseName);

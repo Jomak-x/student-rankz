@@ -16,8 +16,11 @@ export type InitiateResult =
   | { ok: true; universityId: string }
   | { ok: false; error: InitiateError };
 
+// accountSubject is intentionally absent from the success DTO — the caller
+// supplied the principal and already knows it; including it risks inadvertent
+// serialisation into a response body.
 export type ConsumeResult =
-  | { ok: true; universityId: string; accountSubject: string }
+  | { ok: true; universityId: string }
   | { ok: false; error: ConsumeError };
 
 export type VerificationStatus = {

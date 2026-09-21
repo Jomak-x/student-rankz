@@ -1,4 +1,4 @@
-import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import type { PgDatabase } from "drizzle-orm/pg-core";
@@ -18,8 +18,8 @@ import type {
 export type { ConsumeError, ConsumeResult, InitiateError, InitiateResult, VerificationStatus };
 
 // Accepts both drizzle-orm/node-postgres (tests) and drizzle-orm/neon-serverless
-// (production). NOT compatible with drizzle-orm/neon-http, which lacks
-// interactive transactions required for the atomic consume operation.
+// (production).  NOT compatible with drizzle-orm/neon-http, which lacks the
+// interactive transactions required for the atomic consume and initiate operations.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AffiliationDb = PgDatabase<any, Record<string, never>>;
 
@@ -28,15 +28,20 @@ export interface AffiliationServiceConfig {
   transport: EmailTransport;
   /**
    * Required HMAC secret.  Construction throws if empty — fail closed.
-   * In production, supply from AFFILIATION_HMAC_SECRET environment variable.
+   * Supply from AFFILIATION_HMAC_SECRET in production.
    */
   hmacSecret: string;
   /** Minutes before a verification code expires. Default: 15. */
   codeExpiryMinutes?: number;
-  /** Maximum wrong-code attempts before a code is locked out. Default: 5. */
+  /** Maximum wrong-code attempts before a challenge is locked. Default: 5. */
   maxAttempts?: number;
   /** Maximum codes sent per account+university per hour. Default: 3. */
   maxSendsPerHour?: number;
+  /**
+   * Maximum active (pending or sent) challenges to the same email address
+   * across ALL accounts (best-effort anti-spam).  Default: 5.
+   */
+  maxSendsPerEmailPerHour?: number;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -50,6 +55,7 @@ export class AffiliationService {
   private readonly codeExpiryMs: number;
   private readonly maxAttempts: number;
   private readonly maxSendsPerHour: number;
+  private readonly maxSendsPerEmailPerHour: number;
 
   constructor(config: AffiliationServiceConfig) {
     if (!config.hmacSecret) {
@@ -63,15 +69,25 @@ export class AffiliationService {
     this.codeExpiryMs = (config.codeExpiryMinutes ?? 15) * 60 * 1000;
     this.maxAttempts = config.maxAttempts ?? 5;
     this.maxSendsPerHour = config.maxSendsPerHour ?? 3;
+    this.maxSendsPerEmailPerHour = config.maxSendsPerEmailPerHour ?? 5;
   }
 
   /**
    * Initiate university-email verification for a principal.
    *
-   * Looks up the email domain in the curated registry, applies send-rate
-   * throttling, generates and HMAC-stores a one-time code, then sends it via
-   * the injected transport.  On transport failure the stored HMAC is cleared
-   * so no undelivered code lingers — verified is never set on failure.
+   * Design guarantees:
+   *   1. All state mutations (slot creation, challenge write, throttle increment)
+   *      happen inside a single transaction under a row-level FOR UPDATE lock.
+   *      Concurrent initiations for the same account+university are serialised;
+   *      throttle and verified checks cannot be bypassed by racing requests.
+   *   2. No database transaction is open while the email is being sent.
+   *      (Neon enforces a strict transaction time-limit; holding a transaction
+   *      across an external HTTP call would also block other queries on the row.)
+   *   3. The delivery-confirmation and failure-cleanup UPDATEs are scoped to
+   *      the challengeId generated this call.  A concurrent resend that commits
+   *      a new challengeId before our cleanup runs will not be affected.
+   *   4. send failure does not mark verified.  On transport error, the pending
+   *      challenge is cleared; the row is left intact and unverified.
    *
    * @param principal  Server-supplied auth-provider subject; never from body.
    * @param email      Email address to verify (must match registry domain).
@@ -82,6 +98,7 @@ export class AffiliationService {
 
     const normalizedEmail = `${parsed.localPart}@${parsed.domain}`;
 
+    // Domain registry lookup (no row lock needed — domains are admin-only writes).
     const [domainRow] = await this.db
       .select({ universityId: universityDomains.universityId })
       .from(universityDomains)
@@ -100,63 +117,96 @@ export class AffiliationService {
       .where(eq(universities.id, universityId));
     if (!uni) return { ok: false, error: "UNKNOWN_DOMAIN" as InitiateError };
 
-    const [existing] = await this.db
-      .select()
+    // Per-email recipient throttle (best-effort; not row-locked).
+    // Counts active challenges (delivery_state IS NOT NULL) for this address
+    // across all accounts.  Best-effort because it is not included in the
+    // per-account exclusive lock below, but limits bulk cross-account spam.
+    const [{ emailCount }] = await this.db
+      .select({ emailCount: sql<number>`count(*)::int` })
       .from(accountVerifications)
       .where(
         and(
-          eq(accountVerifications.accountSubject, principal),
-          eq(accountVerifications.universityId, universityId),
+          eq(accountVerifications.emailAddress, normalizedEmail),
+          sql`${accountVerifications.deliveryState} IS NOT NULL`,
         ),
       );
-
-    if (existing?.verified) return { ok: false, error: "ALREADY_VERIFIED" as InitiateError };
-
-    // Send-rate throttle: reset when the window has elapsed.
-    if (existing) {
-      const windowAge = Date.now() - existing.sendWindowStartsAt.getTime();
-      if (windowAge < HOUR_MS && existing.sendCount >= this.maxSendsPerHour) {
-        return { ok: false, error: "RATE_LIMITED" as InitiateError };
-      }
+    if (emailCount >= this.maxSendsPerEmailPerHour) {
+      return { ok: false, error: "RATE_LIMITED" as InitiateError };
     }
 
-    // Generate code and HMAC before touching the DB so a crypto failure
-    // never leaves partial state.
+    // Generate challenge material before the transaction — no async crypto
+    // inside the critical section.
+    const challengeId = randomUUID();
     const code = randomInt(CODE_MIN, CODE_MAX).toString();
-    const codeHmac = this.computeHmac(code);
+    const codeHmac = this.computeHmac(principal, universityId, normalizedEmail, code);
     const codeExpiresAt = new Date(Date.now() + this.codeExpiryMs);
-    const now = new Date();
 
-    if (existing) {
-      const windowAge = Date.now() - existing.sendWindowStartsAt.getTime();
-      const resetWindow = windowAge >= HOUR_MS;
-      await this.db
+    // ── Atomic reservation ──────────────────────────────────────────────────
+    // Open a transaction and lock (or create) the (account, university) slot.
+    // All throttle and verified checks happen under the lock so concurrent
+    // initiations cannot bypass them.  No external I/O inside this transaction.
+    const reservation = await this.db.transaction(async (tx) => {
+      // Ensure the slot exists — INSERT is a no-op if the row already exists.
+      // This avoids the classic "two concurrent firsts both see no row and
+      // both try to INSERT" race: the second INSERT ON CONFLICT DO NOTHING
+      // blocks until the first transaction commits, then resolves to a no-op.
+      await (tx as AffiliationDb).execute(sql`
+        INSERT INTO account_verifications
+          (account_subject, university_id, email_address, send_window_starts_at)
+        VALUES (${principal}, ${universityId}, ${normalizedEmail}, now())
+        ON CONFLICT (account_subject, university_id) DO NOTHING
+      `);
+
+      // Lock the row exclusively for the remainder of this transaction.
+      const [record] = await (tx as AffiliationDb)
+        .select()
+        .from(accountVerifications)
+        .where(
+          and(
+            eq(accountVerifications.accountSubject, principal),
+            eq(accountVerifications.universityId, universityId),
+          ),
+        )
+        .for("update");
+
+      if (!record) return { blocked: "UNKNOWN_DOMAIN" as InitiateError };
+      if (record.verified) return { blocked: "ALREADY_VERIFIED" as InitiateError };
+
+      // Per-account rate limit (evaluated under the lock for accuracy).
+      const windowAge = Date.now() - record.sendWindowStartsAt.getTime();
+      const windowExpired = windowAge >= HOUR_MS;
+      const effectiveSendCount = windowExpired ? 0 : record.sendCount;
+      if (effectiveSendCount >= this.maxSendsPerHour) {
+        return { blocked: "RATE_LIMITED" as InitiateError };
+      }
+
+      const newSendCount = effectiveSendCount + 1;
+      const newWindowStart = windowExpired ? new Date() : record.sendWindowStartsAt;
+
+      // Write the pending challenge under the lock.  A resend also updates
+      // email_address here — verified=true is already blocked above so the
+      // address will never be changed on an already-verified row.
+      await (tx as AffiliationDb)
         .update(accountVerifications)
         .set({
           emailAddress: normalizedEmail,
+          challengeId,
+          deliveryState: "pending",
           codeHmac,
           codeExpiresAt,
-          attemptCount: 0, // resend resets attempt counter on new code
-          sendCount: resetWindow ? 1 : sql`${accountVerifications.sendCount} + 1`,
-          sendWindowStartsAt: resetWindow ? now : existing.sendWindowStartsAt,
-          updatedAt: now,
+          attemptCount: 0,
+          sendCount: newSendCount,
+          sendWindowStartsAt: newWindowStart,
+          updatedAt: new Date(),
         })
-        .where(eq(accountVerifications.id, existing.id));
-    } else {
-      await this.db.insert(accountVerifications).values({
-        accountSubject: principal,
-        universityId,
-        emailAddress: normalizedEmail,
-        codeHmac,
-        codeExpiresAt,
-        attemptCount: 0,
-        sendCount: 1,
-        sendWindowStartsAt: now,
-      });
-    }
+        .where(eq(accountVerifications.id, record.id));
 
-    // Send the code.  On any failure, erase the HMAC so no unsent code can
-    // be replayed.  Fail closed: do not mark verified.
+      return { ok: true as const };
+    });
+
+    if (!reservation.ok) return { ok: false, error: reservation.blocked };
+
+    // ── Email delivery (no open transaction) ────────────────────────────────
     try {
       await this.transport.sendVerificationCode({
         to: normalizedEmail,
@@ -164,18 +214,40 @@ export class AffiliationService {
         universityName: uni.name,
       });
     } catch {
-      // Redact: never log the code, address, or university.
+      // Scoped failure cleanup: only clear THIS challenge.
+      // WHERE challenge_id = X ensures a concurrent resend that has already
+      // committed a new challenge_id is not affected.
+      // WHERE delivery_state = 'pending' ensures we don't clear a challenge
+      // that another path already confirmed.
+      // Redact: never log the code, address, or university name.
       await this.db
         .update(accountVerifications)
-        .set({ codeHmac: null, codeExpiresAt: null, updatedAt: new Date() })
+        .set({
+          challengeId: null,
+          deliveryState: null,
+          codeHmac: null,
+          codeExpiresAt: null,
+          updatedAt: new Date(),
+        })
         .where(
           and(
-            eq(accountVerifications.accountSubject, principal),
-            eq(accountVerifications.universityId, universityId),
+            eq(accountVerifications.challengeId, challengeId),
+            eq(accountVerifications.deliveryState, "pending"),
           ),
         );
       return { ok: false, error: "SEND_FAILED" as InitiateError };
     }
+
+    // Confirm delivery — challenge is now consumable.
+    await this.db
+      .update(accountVerifications)
+      .set({ deliveryState: "sent", updatedAt: new Date() })
+      .where(
+        and(
+          eq(accountVerifications.challengeId, challengeId),
+          eq(accountVerifications.deliveryState, "pending"),
+        ),
+      );
 
     return { ok: true, universityId };
   }
@@ -183,13 +255,17 @@ export class AffiliationService {
   /**
    * Consume a verification code.
    *
-   * Runs inside a real database transaction with a row-level lock (SELECT FOR
-   * UPDATE) to prevent concurrent replay — two simultaneous consumes for the
-   * same account+university are serialized; the second sees `verified = true`
-   * and returns ALREADY_VERIFIED.
+   * Runs inside a real database transaction with a row-level FOR UPDATE lock to
+   * prevent concurrent replay — two simultaneous consumes for the same
+   * account+university are serialised; the second sees verified=true and returns
+   * ALREADY_VERIFIED.
    *
-   * Uses timing-safe HMAC comparison.  Wrong code, expired, or locked-out
-   * codes all return INVALID_CODE to avoid leaking information.
+   * The challenge is only consumable when delivery_state = 'sent', preventing
+   * consumption before the email is confirmed delivered.
+   *
+   * Uses timing-safe HMAC comparison.  Wrong code, expired, locked-out, pending
+   * (not yet delivered), and mismatched address all return INVALID_CODE or
+   * NOT_PENDING to avoid leaking state.
    *
    * @param principal  Server-supplied auth-provider subject; never from body.
    * @param email      The email address the code was sent to.
@@ -217,11 +293,9 @@ export class AffiliationService {
     if (!domainRow) return { ok: false, error: "UNKNOWN_DOMAIN" as ConsumeError };
     const { universityId } = domainRow;
 
-    // Atomic consume: the transaction + FOR UPDATE lock serializes concurrent
-    // replays.  Requires a real interactive-transaction transport (node-postgres
-    // or neon-serverless WebSocket Pool) — NOT neon-http.
+    // Atomic consume: FOR UPDATE lock serialises concurrent replays.
     const result = await this.db.transaction(async (tx) => {
-      const rows = await (tx as AffiliationDb)
+      const [record] = await (tx as AffiliationDb)
         .select()
         .from(accountVerifications)
         .where(
@@ -232,13 +306,18 @@ export class AffiliationService {
         )
         .for("update");
 
-      const record = rows[0];
-
       if (!record) return { ok: false as const, error: "NOT_PENDING" as ConsumeError };
       if (record.verified) return { ok: false as const, error: "ALREADY_VERIFIED" as ConsumeError };
 
-      // Enumeration-safe: wrong address, no pending code, expired, and max
-      // attempts all return the same INVALID_CODE to prevent oracle attacks.
+      // Require delivery_state = 'sent' — prevents consuming a challenge that
+      // the transport hasn't confirmed yet ('pending') or that was cleared
+      // after a failed send (null).
+      if (record.deliveryState !== "sent") {
+        return { ok: false as const, error: "NOT_PENDING" as ConsumeError };
+      }
+
+      // Enumeration-safe: address mismatch, no active code, expired, and max
+      // attempts exhausted all return INVALID_CODE to prevent oracle attacks.
       if (record.emailAddress !== normalizedEmail) {
         return { ok: false as const, error: "INVALID_CODE" as ConsumeError };
       }
@@ -252,7 +331,9 @@ export class AffiliationService {
         return { ok: false as const, error: "INVALID_CODE" as ConsumeError };
       }
 
-      const expectedHmac = this.computeHmac(code);
+      // Context-bound HMAC comparison — binds principal, universityId, email,
+      // and code so a code issued for one context cannot be replayed in another.
+      const expectedHmac = this.computeHmac(principal, universityId, normalizedEmail, code);
       if (!hmacEqual(expectedHmac, record.codeHmac)) {
         await (tx as AffiliationDb)
           .update(accountVerifications)
@@ -270,6 +351,8 @@ export class AffiliationService {
         .set({
           verified: true,
           verifiedAt: new Date(),
+          challengeId: null,
+          deliveryState: null,
           codeHmac: null,
           codeExpiresAt: null,
           attemptCount: 0,
@@ -277,7 +360,7 @@ export class AffiliationService {
         })
         .where(eq(accountVerifications.id, record.id));
 
-      return { ok: true as const, universityId, accountSubject: principal };
+      return { ok: true as const, universityId };
     });
 
     return result;
@@ -286,6 +369,7 @@ export class AffiliationService {
   /**
    * Return the verification status for a principal+university pair.
    * Returns null if no record exists (not yet initiated).
+   * The returned DTO omits all private fields (HMAC, challenge, subject).
    */
   async getStatus(
     principal: string,
@@ -313,13 +397,24 @@ export class AffiliationService {
     };
   }
 
-  private computeHmac(code: string): string {
-    return createHmac("sha256", this.hmacKey).update(code, "utf8").digest("hex");
+  /**
+   * Compute a context-bound HMAC that covers the full challenge context.
+   * Null bytes separate fields to prevent concatenation attacks
+   * (e.g. subject="a\0b" + univ="c"  ≠  subject="a" + univ="b\0c").
+   */
+  private computeHmac(
+    principal: string,
+    universityId: string,
+    normalizedEmail: string,
+    code: string,
+  ): string {
+    const message = `${principal}\0${universityId}\0${normalizedEmail}\0${code}`;
+    return createHmac("sha256", this.hmacKey).update(message, "utf8").digest("hex");
   }
 }
 
 // Timing-safe hex string comparison.  Both arguments are SHA-256 HMAC hex
-// strings (always 64 chars), but we guard against length mismatches.
+// strings (always 64 chars) but we guard against length mismatches.
 function hmacEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   const bufA = Buffer.from(a, "hex");
