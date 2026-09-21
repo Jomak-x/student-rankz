@@ -85,3 +85,19 @@ CREATE INDEX IF NOT EXISTS "account_verifications_university_idx"
 -- Partial index for per-email recipient throttle lookups.
 CREATE INDEX IF NOT EXISTS "account_verifications_email_delivery_idx"
     ON "account_verifications" ("email_address", "delivery_state");
+
+-- Immutable send log for per-email recipient throttling.
+-- Independent of the mutable account_verifications row: address changes
+-- and new challenges do NOT erase these entries.  Pruned after 1 hour.
+CREATE TABLE IF NOT EXISTS "recipient_send_log" (
+    "id"              uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+    "recipient_email" text NOT NULL,
+    "challenge_id"    uuid NOT NULL,
+    "sent_at"         timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "recipient_send_log_email_sent_idx"
+    ON "recipient_send_log" ("recipient_email", "sent_at");
+
+CREATE INDEX IF NOT EXISTS "recipient_send_log_challenge_idx"
+    ON "recipient_send_log" ("challenge_id");

@@ -11,6 +11,23 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+// Immutable send log for per-email recipient throttling.
+// Each row records one send attempt; address changes and new challenges in
+// account_verifications do NOT erase these entries.  Pruned after 1 hour.
+export const recipientSendLog = pgTable(
+  "recipient_send_log",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    recipientEmail: text().notNull(),
+    challengeId: uuid().notNull(),
+    sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("recipient_send_log_email_sent_idx").on(t.recipientEmail, t.sentAt),
+    index("recipient_send_log_challenge_idx").on(t.challengeId),
+  ],
+);
+
 import { universities } from "./schema";
 
 // Curated registry of approved email domains per university.
