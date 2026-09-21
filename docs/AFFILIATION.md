@@ -15,7 +15,7 @@ The service is implemented and tested.  No Next.js routes or auth UI exist in th
 - **Principal from server session only.** The caller supplies the account subject from a validated server-side session.  The subject is never inferred from the request body.
 - **Single-row per (account, university).** One slot per pair; re-sending invalidates the previous challenge.
 - **Atomic reservation.** `INSERT … ON CONFLICT DO NOTHING` + `SELECT … FOR UPDATE` serializes concurrent initiations; throttle and verified checks run under the row lock.
-- **Durable cross-account recipient throttle.** `pg_advisory_xact_lock(hashtext(email))` serializes concurrent requests to the same recipient.  Sends are recorded in the immutable `recipient_send_log` table — independent of the mutable verification row.  Address changes and new challenges do **not** erase log entries.  The per-email count is time-bounded (1-hour window); expired entries are pruned inside the advisory lock.
+- **Durable cross-account recipient throttle.** `pg_advisory_xact_lock(hashtext(email))` serializes concurrent requests to the same recipient.  Sends are recorded in the immutable `recipient_send_log` table — independent of the mutable verification row.  Address changes and new challenges do **not** erase log entries.  The per-email count is time-bounded (1-hour window); expired entries are pruned inside the advisory lock and by a global maintenance sweep. Transport errors never refund recipient capacity before expiry.
 - **No transaction held across I/O.** The DB transaction commits before the email is sent.  The delivery-state machine coordinates what happens after.
 - **Delivery-state guard.** A challenge is only consumable once the transport confirms delivery (`delivery_state = 'sent'`).  A challenge in `delivery_state = 'pending'` (written but not yet confirmed) or `null` (cleared) is not consumable.
 - **Scoped failure cleanup.** On transport error, the cleanup `UPDATE` is scoped to the specific `challenge_id` generated for this send.  A concurrent resend that already committed a new challenge is not affected.
@@ -105,7 +105,7 @@ The scoped cleanup `WHERE challenge_id = X AND delivery_state = 'pending'` only 
 3. (Moved inside the transaction — see step 4.)
 4. Begin transaction:
    - `pg_advisory_xact_lock(hashtext(email))` — serializes all senders to same recipient.
-   - Prune expired `recipient_send_log` entries (>1 hour old) for this email.
+   - Prune expired `recipient_send_log` entries (at least 1 hour old) for this email.
    - Count remaining log entries for this email → `RATE_LIMITED` if `≥ maxSendsPerEmailPerHour`.
    - `INSERT INTO account_verifications … ON CONFLICT DO NOTHING` — creates the slot if absent.
    - `SELECT … FOR UPDATE` — locks the slot.
@@ -116,7 +116,7 @@ The scoped cleanup `WHERE challenge_id = X AND delivery_state = 'pending'` only 
 5. Transaction commits.
 6. Call `transport.sendVerificationCode({ to, code, universityName })`.
    - On success: `UPDATE … SET delivery_state = 'sent' WHERE challenge_id = X AND delivery_state = 'pending'`.
-   - On failure: delete the `recipient_send_log` entry for this challenge_id, then `UPDATE … SET challenge_id = null, delivery_state = null, code_hmac = null, code_expires_at = null WHERE challenge_id = X AND delivery_state = 'pending'`.  Returns `SEND_FAILED`.
+   - On failure: retain the `recipient_send_log` reservation until expiry (provider acceptance may precede an acknowledgment failure), then `UPDATE … SET challenge_id = null, delivery_state = null, code_hmac = null, code_expires_at = null WHERE challenge_id = X AND delivery_state = 'pending'`.  Returns `SEND_FAILED`.
 
 Returns:
 - `{ ok: true, universityId }` on success
@@ -186,7 +186,37 @@ The `recipient_send_log` table records each send reservation independently of th
 | `challenge_id` | UUID | Links to the challenge that triggered this send |
 | `sent_at` | timestamptz | When the reservation was created (defaults to `now()`) |
 
-Entries older than 1 hour are pruned inside the advisory lock during initiate.  On send failure, the log entry for the failed challenge_id is deleted to release capacity.
+Reservations remain consumed for the full one-hour throttle window, even if the transport throws after accepting an email. Challenge invalidation is separate from ledger retention. Opportunistic pruning during initiate removes only expired entries for that recipient.
+
+### Global retention cleanup
+
+`cleanupRecipientSendLog(db)` removes **all** reservations with `sent_at <= now() - interval '1 hour'`, including abandoned addresses that never initiate again. The fixed database-clock cutoff matches the throttle window, cannot be overridden by a caller, and preserves every active reservation. A single atomic statement returns only the deleted count; no addresses, challenge IDs, codes, or credentials are logged. The schema and transactional account/recipient locks are unchanged.
+
+Trusted maintenance code can call it without an email transport or HMAC secret:
+
+```ts
+import { cleanupRecipientSendLog } from "@/server/affiliation/cleanup";
+import { createAffiliationDb } from "@/server/affiliation/db";
+
+const { db, pool } = createAffiliationDb();
+try {
+  const deletedCount = await cleanupRecipientSendLog(db);
+  // Expose only the aggregate to an authenticated maintenance caller.
+  void deletedCount;
+} finally {
+  await pool.end();
+}
+```
+
+For an operator-run sweep, export `DATABASE_URL` securely for the intended database, verify the target, then run:
+
+```bash
+npm run affiliation:cleanup -- --yes
+```
+
+The CLI uses the existing `pg` TCP driver (including for local PostgreSQL), requires exactly `--yes`, rejects recipient/cutoff options, does not load `.env` files, and closes its pool. It limits connection setup to 5 seconds and the statement to 30 seconds. Failure exits nonzero with a generic message, without printing connection strings or database errors. No migration or email operation runs.
+
+**Retention contract:** after each successful sweep, no committed expired reservations visible to that statement remain, across all recipients. With successful sweeps at most 15 minutes apart, normally committed reservations are retained for at most 75 minutes (one-hour window plus sweep interval; add any transaction visibility delay). Maintenance failures or long transactions extend that bound and require retry/monitoring. This is a required operating cadence, **not a deployed schedule**: this PR supplies only the cleanup function and safe CLI. The final integration worker must wire the periodic authenticated cleanup route and monitor successful runs. Until that is deployed or the CLI is run regularly, abandoned records have no automatic wall-clock retention bound.
 
 ---
 
@@ -203,11 +233,13 @@ Entries older than 1 hour are pruned inside the advisory lock during initiate.  
 
 ## Running tests
 
-Tests require a local PostgreSQL instance.  Set `TEST_DATABASE_URL` or `DATABASE_URL` to a superuser connection string; the helpers create and drop ephemeral databases per test.
+Tests require a local PostgreSQL instance.  Set `TEST_DATABASE_URL` to an administrative connection string (default: local fixture PostgreSQL on port 15432); the helpers create and drop ephemeral databases per test.
 
 ```bash
 npm run test:affiliation
 ```
+
+The affiliation script covers service, concurrency, and global-cleanup/CLI regressions. Cleanup tests use synthetic ephemeral databases and cover untouched old recipients, exact expiry boundaries, active-row preservation, idempotence, CLI opt-in, and output privacy.
 
 Concurrency tests use two separate DB connections per test to exercise the real row-lock serialization — in-process mocks are insufficient.
 

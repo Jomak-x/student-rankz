@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test:affiliation": "node --import tsx --test tests/affiliation/service.dbtest.ts tests/affiliation/concurrency.dbtest.ts",
+    "test:affiliation": "node --import tsx --test tests/affiliation/service.dbtest.ts tests/affiliation/concurrency.dbtest.ts tests/affiliation/cleanup.dbtest.ts",
+    "affiliation:cleanup": "tsx server/affiliation/cleanup-cli.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

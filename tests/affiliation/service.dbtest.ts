@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { eq, sql } from "drizzle-orm";
 
+import { accountVerifications, recipientSendLog } from "@/db/affiliation-schema";
 import { AffiliationService } from "@/server/affiliation/service";
 import { FailingTransport, MockTransport } from "@/server/affiliation/email";
 
@@ -14,6 +16,61 @@ import {
 } from "./helpers.js";
 
 const SECRET = "test-hmac-secret-32-bytes-long!!";
+
+test("initiate: accepted email with failed acknowledgment never refunds recipient capacity", async () => {
+  const { db, databaseName } = await createAffiliationTestDb();
+  try {
+    await seedFixtures(db);
+    const accepted = new MockTransport();
+    const email = `uncertain@${DOMAINS.westhavenStudent}`;
+    const service = new AffiliationService({
+      db,
+      hmacSecret: SECRET,
+      maxSendsPerEmailPerHour: 1,
+      transport: {
+        async sendVerificationCode(message) {
+          await accepted.sendVerificationCode(message);
+          throw new Error("Acknowledgment lost after provider acceptance");
+        },
+      },
+    });
+    assert.deepEqual(await service.initiate("sub|uncertain", email), {
+      ok: false, error: "SEND_FAILED",
+    });
+    assert.equal(accepted.sent.length, 1);
+    const [record] = await db.select().from(accountVerifications);
+    assert.equal(record.verified, false);
+    assert.equal(record.verifiedAt, null);
+    assert.equal(record.challengeId, null);
+    assert.equal(record.deliveryState, null);
+    assert.equal(record.codeHmac, null);
+    assert.equal(record.codeExpiresAt, null);
+    assert.equal(record.sendCount, 1);
+    const reservations = await db.select().from(recipientSendLog);
+    assert.equal(reservations.length, 1);
+    assert.equal(reservations[0].recipientEmail, email);
+    assert.deepEqual(await service.consume("sub|uncertain", email, accepted.sent[0].code), {
+      ok: false, error: "NOT_PENDING",
+    });
+    const retryTransport = new MockTransport();
+    const retry = new AffiliationService({
+      db, transport: retryTransport, hmacSecret: SECRET, maxSendsPerEmailPerHour: 1,
+    });
+    for (const principal of ["sub|uncertain", "sub|another", "sub|third"]) {
+      assert.deepEqual(await retry.initiate(principal, email), {
+        ok: false, error: "RATE_LIMITED",
+      });
+    }
+    assert.equal(retryTransport.sent.length, 0);
+    await db.update(recipientSendLog)
+      .set({ sentAt: sql`now() - interval '2 hours'` })
+      .where(eq(recipientSendLog.id, reservations[0].id));
+    assert.ok((await retry.initiate("sub|another", email)).ok);
+    assert.equal(retryTransport.sent.length, 1);
+  } finally {
+    await dropAffiliationTestDb(db, databaseName);
+  }
+});
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
