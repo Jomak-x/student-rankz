@@ -117,23 +117,6 @@ export class AffiliationService {
       .where(eq(universities.id, universityId));
     if (!uni) return { ok: false, error: "UNKNOWN_DOMAIN" as InitiateError };
 
-    // Per-email recipient throttle (best-effort; not row-locked).
-    // Counts active challenges (delivery_state IS NOT NULL) for this address
-    // across all accounts.  Best-effort because it is not included in the
-    // per-account exclusive lock below, but limits bulk cross-account spam.
-    const [{ emailCount }] = await this.db
-      .select({ emailCount: sql<number>`count(*)::int` })
-      .from(accountVerifications)
-      .where(
-        and(
-          eq(accountVerifications.emailAddress, normalizedEmail),
-          sql`${accountVerifications.deliveryState} IS NOT NULL`,
-        ),
-      );
-    if (emailCount >= this.maxSendsPerEmailPerHour) {
-      return { ok: false, error: "RATE_LIMITED" as InitiateError };
-    }
-
     // Generate challenge material before the transaction — no async crypto
     // inside the critical section.
     const challengeId = randomUUID();
@@ -142,10 +125,36 @@ export class AffiliationService {
     const codeExpiresAt = new Date(Date.now() + this.codeExpiryMs);
 
     // ── Atomic reservation ──────────────────────────────────────────────────
-    // Open a transaction and lock (or create) the (account, university) slot.
-    // All throttle and verified checks happen under the lock so concurrent
-    // initiations cannot bypass them.  No external I/O inside this transaction.
+    // Open a transaction that serializes both the cross-account per-email
+    // throttle AND the per-account slot reservation.  No external I/O inside.
+    //
+    // Lock order (deadlock-free):
+    //   1. Advisory lock on email hash — serializes all senders to same email
+    //   2. Row-level FOR UPDATE on (account_subject, university_id)
     const reservation = await this.db.transaction(async (tx) => {
+      // Advisory lock keyed on the email address.  Serializes concurrent
+      // requests to the same recipient across all accounts so the email
+      // count below is accurate and not subject to TOCTOU races.
+      await (tx as AffiliationDb).execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${normalizedEmail}))`,
+      );
+
+      // Per-email recipient throttle — time-bounded to avoid permanent lockout
+      // from abandoned/expired challenges.
+      const [{ emailCount }] = await (tx as AffiliationDb)
+        .select({ emailCount: sql<number>`count(*)::int` })
+        .from(accountVerifications)
+        .where(
+          and(
+            eq(accountVerifications.emailAddress, normalizedEmail),
+            sql`${accountVerifications.deliveryState} IS NOT NULL`,
+            sql`${accountVerifications.updatedAt} > now() - interval '1 hour'`,
+          ),
+        );
+      if (emailCount >= this.maxSendsPerEmailPerHour) {
+        return { blocked: "RATE_LIMITED" as InitiateError };
+      }
+
       // Ensure the slot exists — INSERT is a no-op if the row already exists.
       // This avoids the classic "two concurrent firsts both see no row and
       // both try to INSERT" race: the second INSERT ON CONFLICT DO NOTHING

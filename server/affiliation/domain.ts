@@ -61,11 +61,13 @@ export function normalizeDomain(raw: string): string | null {
   // would silently consume rather than reject:
   //   :  → stripped port (e.g. "evil.com:443" → hostname "evil.com")
   //   /  → path separator
+  //   \  → treated as / in special schemes (backslash normalization)
   //   @  → userinfo separator
   //   #  → fragment
   //   ?  → query string
   //   %  → percent-encoded sequences (e.g. "%40" → "@")
-  if (/[:/@#?%]/.test(trimmed)) return null;
+  //   _  → not valid in DNS hostnames (RFC 952); DB CHECK also rejects
+  if (/[:/@#?%\\_]/.test(trimmed)) return null;
 
   let url: URL;
   try {
@@ -102,8 +104,10 @@ export function normalizeDomain(raw: string): string | null {
   if (hostname.startsWith("[")) return null;
 
   // Reject labels that start or end with a hyphen (RFC 1123 § 2.1).
-  // Covers the beginning, end, and every dot-separated boundary.
-  if (/(^|\.)(-)|(-)(\.?)$/.test(hostname)) return null;
+  const labels = hostname.split(".");
+  for (const label of labels) {
+    if (!label || label.startsWith("-") || label.endsWith("-")) return null;
+  }
 
   return hostname;
 }

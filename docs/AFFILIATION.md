@@ -15,6 +15,7 @@ The service is implemented and tested.  No Next.js routes or auth UI exist in th
 - **Principal from server session only.** The caller supplies the account subject from a validated server-side session.  The subject is never inferred from the request body.
 - **Single-row per (account, university).** One slot per pair; re-sending invalidates the previous challenge.
 - **Atomic reservation.** `INSERT … ON CONFLICT DO NOTHING` + `SELECT … FOR UPDATE` serializes concurrent initiations; throttle and verified checks run under the row lock.
+- **Atomic cross-account recipient throttle.** `pg_advisory_xact_lock(hashtext(email))` serializes concurrent requests to the same recipient across all accounts.  The per-email count is time-bounded (1-hour window) so expired/abandoned challenges release capacity.
 - **No transaction held across I/O.** The DB transaction commits before the email is sent.  The delivery-state machine coordinates what happens after.
 - **Delivery-state guard.** A challenge is only consumable once the transport confirms delivery (`delivery_state = 'sent'`).  A challenge in `delivery_state = 'pending'` (written but not yet confirmed) or `null` (cleared) is not consumable.
 - **Scoped failure cleanup.** On transport error, the cleanup `UPDATE` is scoped to the specific `challenge_id` generated for this send.  A concurrent resend that already committed a new challenge is not affected.
@@ -48,16 +49,16 @@ process.on("SIGTERM", () => closeAffiliationDb());
 
 ```ts
 import { AffiliationService } from "@/server/affiliation/service";
-import { ResendTransport } from "@/server/affiliation/email";   // production adapter
+import { ResendTransport } from "@/server/affiliation/resend";   // production adapter
 
 const service = new AffiliationService({
   db: getAffiliationDb(),
-  transport: new ResendTransport(process.env.RESEND_API_KEY!),
+  transport: ResendTransport.fromEnv(),
   hmacSecret: process.env.AFFILIATION_HMAC_SECRET!,
   codeExpiryMinutes: 15,   // default
   maxAttempts: 5,          // default
   maxSendsPerHour: 3,      // per account+university, enforced under row lock
-  maxSendsPerEmailPerHour: 5,  // per email address across all accounts, best-effort
+  maxSendsPerEmailPerHour: 5,  // per email, cross-account, atomic advisory lock
 });
 ```
 
@@ -94,8 +95,10 @@ The scoped cleanup `WHERE challenge_id = X AND delivery_state = 'pending'` only 
 
 1. Parse and normalize `email`; reject malformed formats, IPv4 domains, port/path/fragment injections, percent-encoded hostnames.
 2. Look up `email.domain` in `university_domains` (active only).
-3. Best-effort per-email recipient throttle (counts active challenges to this address across all accounts; not row-locked).
+3. (Moved inside the transaction — see step 4.)
 4. Begin transaction:
+   - `pg_advisory_xact_lock(hashtext(email))` — serializes all senders to same recipient.
+   - Per-email recipient count (time-bounded: only challenges updated within the last hour) → `RATE_LIMITED`.
    - `INSERT INTO account_verifications … ON CONFLICT DO NOTHING` — creates the slot if absent.
    - `SELECT … FOR UPDATE` — locks the slot.
    - Check `verified = true` → `ALREADY_VERIFIED`.
@@ -135,13 +138,14 @@ Returns `null` if no record exists.  Returns `{ verified, universityId, verified
 ## Domain validation
 
 Before any IDNA/URL-parse step, `parseEmail` rejects input containing:
-- Characters that would be reinterpreted by URL parsers: `:`, `/`, `@` (second occurrence), `#`, `?`, `%`
+- Characters that would be reinterpreted by URL parsers: `:`, `/`, `\`, `@` (second occurrence), `#`, `?`, `%`
+- Characters not valid in DNS hostnames: `_` (RFC 952)
 - Control characters `[\x00–\x1F\x7F]`
 
 After URL parsing:
 - `url.port`, `url.search`, `url.hash`, `url.username`, `url.password` must all be empty.
 - `url.pathname` must be `"/"`.
-- No label may begin or end with a hyphen.
+- Every dot-separated label is checked: no label may begin or end with a hyphen (RFC 1123 § 2.1).
 
 DB-level constraints (enforced independently):
 - Domain labels must begin and end with `[a-z0-9]` and may contain hyphens in the middle.
@@ -169,6 +173,7 @@ The binding means a code for Alice cannot be replayed as Bob, a code for univers
 | `DATABASE_URL` | Yes | Pooled Neon connection string (WebSocket-capable) |
 | `AFFILIATION_HMAC_SECRET` | Yes | 32+ byte secret for challenge HMAC; construction throws if empty |
 | `RESEND_API_KEY` | Yes (production) | Resend API key for the email transport |
+| `RESEND_FROM` | Yes (production) | Sender address for verification emails (e.g. `verify@studentrankz.com`) |
 
 ---
 
