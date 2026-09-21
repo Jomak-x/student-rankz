@@ -58,6 +58,12 @@ jobs:
       - name: Affiliation service tests when present
         run: npm run test:affiliation --if-present
 
+      - name: Catalog service tests
+        run: npm run test:catalog
+
+      - name: Migration tracking tests
+        run: npm run test:migrations
+
       - name: Private draft service tests
         run: npm run test:drafts
 
