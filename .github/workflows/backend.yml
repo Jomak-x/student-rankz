@@ -2,7 +2,6 @@ name: Backend
 
 on:
   pull_request:
-  pull_request_target:
   push:
     branches: [main]
 
@@ -41,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -53,6 +52,9 @@ jobs:
 
       - name: Database tests (migration, constraints, repeatable seed)
         run: npm run test:db
+
+      - name: Service tests (drafts, ephemeral Postgres)
+        run: npm run test:drafts
 
       - name: Verify committed migrations apply via drizzle-kit
         run: npx drizzle-kit migrate
