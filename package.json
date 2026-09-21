@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts",
+    "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts tests/db/feature-migrations.dbtest.ts",
     "test:catalog": "node --import tsx --test tests/catalog/queries.dbtest.ts tests/catalog/demo-ratings.dbtest.ts tests/catalog/privacy.dbtest.ts tests/catalog/demo-seed-cli.dbtest.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -203,6 +203,16 @@ export function createCatalogService(deps: CatalogServiceDeps): CatalogService {
       const level = normalizeEnum(STUDY_LEVELS, params.level);
       const universityId = normalizeUuid(params.universityId);
       const universitySlug = normalizeSlug(params.universitySlug);
+
+      // An explicitly-provided but malformed identifier must not silently drop
+      // the scope and return all courses. Return an empty page instead.
+      if (params.universityId != null && !universityId) {
+        return emptyPage(listPagination(params));
+      }
+      if (params.universitySlug != null && !universitySlug) {
+        return emptyPage(listPagination(params));
+      }
+
       return withDb(async (db) => {
         let scopedUniversityId = universityId;
         if (!scopedUniversityId && universitySlug) {
