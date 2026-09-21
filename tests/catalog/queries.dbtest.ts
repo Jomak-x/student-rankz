@@ -259,6 +259,30 @@ test("course listing filters, searches and stays deterministic", async () => {
   });
 });
 
+test("malformed scope identifiers return empty page and do not leak all courses", async () => {
+  await withCatalogDatabase(async ({ db, service }) => {
+    await seedDatabase(db);
+
+    // A non-UUID universityId must not silently drop the scope filter.
+    const badId = await service.listCourses({ universityId: "not-a-uuid" });
+    assert.equal(badId.total, 0, "malformed universityId must yield empty page");
+    assert.deepEqual(badId.items, []);
+
+    // An invalid slug must also yield empty, not all courses.
+    const badSlug = await service.listCourses({ universitySlug: "NOT A VALID SLUG!" });
+    assert.equal(badSlug.total, 0, "malformed universitySlug must yield empty page");
+    assert.deepEqual(badSlug.items, []);
+
+    // SQL-injection-shaped slugs must also yield empty.
+    const injected = await service.listCourses({ universitySlug: "'; drop table courses; --" });
+    assert.equal(injected.total, 0);
+
+    // Absence of the param (undefined) is still "no filter".
+    const noFilter = await service.listCourses({ universityId: undefined });
+    assert.ok(noFilter.total > 0, "omitting universityId returns all courses");
+  });
+});
+
 test("sample review pages are paginated, ordered and scoped to the subject", async () => {
   await withCatalogDatabase(async ({ db, service }) => {
     await seedDatabase(db);
