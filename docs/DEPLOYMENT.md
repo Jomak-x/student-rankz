@@ -8,9 +8,11 @@ Production deployment targets one Neon Postgres project (EU region: Frankfurt). 
 
 | Environment | Database branch | Data | Vercel | Auth | Email |
 |---|---|---|---|---|---|
-| **Production** (`main`) | `main` | Real identity + reviews | prod domain | provisioned | live sender |
-| **Demo** | `demo-synthetic` | Synthetic demo data | preview URL | mock sessions | test sender |
-| **Development** | `dev` | Synthetic dev data | local/branch preview | mock sessions | test sender |
+| **Production** (`main`) | `main` | Real identity + reviews | prod domain | managed Neon Auth | live sender |
+| **Demo** | `demo-synthetic` | Synthetic demo data | preview URL | managed Neon Auth (dev credentials) | test sender |
+| **Development** | `dev` | Synthetic dev data | local only | managed Neon Auth (dev credentials) | test sender |
+
+**Note:** All deployed environments (including preview and demo) use managed Neon Auth. Mock sessions are for isolated unit/integration tests only, never deployed environments.
 
 ## Prerequisites
 
@@ -18,8 +20,10 @@ Production deployment targets one Neon Postgres project (EU region: Frankfurt). 
 - Git worktree isolated from `main`; branch targets `origin/main`
 - `neon` CLI signed in (see [BACKEND-SETUP.md](./BACKEND-SETUP.md) CLI authentication)
 - `gh` CLI authenticated
-- Vercel project connected to this repository
+- Vercel project connected to this repository via Git integration
 - Resend account active
+
+**Vercel Hobby plan**: Free for personal, non-commercial use only. Production deployments trigger automatically on every merge to `main` — no manual `vercel deploy` needed when Git integration is configured.
 
 ## Deployment sequence
 
@@ -81,9 +85,13 @@ When database integration lands and a PR introduces database schema changes:
    ```bash
    npm run db:migrate
    ```
-3. Verify schema changes applied:
+3. Verify schema changes applied — connect using the Neon CLI (`neon psql` opens an interactive psql session against the target branch) or run the query in the Neon SQL Editor in the dashboard:
    ```bash
-   neon sql --project-id YOUR_PROJECT_ID "SELECT * FROM information_schema.tables WHERE table_schema='public'"
+   neon psql --project-id YOUR_PROJECT_ID --branch main
+   ```
+   Then in the psql prompt:
+   ```sql
+   SELECT table_name FROM information_schema.tables WHERE table_schema='public';
    ```
 4. Never derive production data into development branches. Schema-only branches only (when supported).
 
@@ -102,20 +110,11 @@ npm run db:seed -- --scope demo
 
 This is opt-in and runs once. Preview deployments do not re-seed on every deploy.
 
-### 5. Deploy preview branch
+### 5. Preview deployments
 
-Preview deploys are automatic when you push to a non-`main` branch (Vercel integration).
+Vercel automatically deploys every push to a non-`main` branch. Each push creates a unique preview URL shown in the PR check. No manual trigger is needed.
 
-For manual preview deploy after merge to `main` (if needed):
-
-```bash
-# Via Vercel CLI
-vercel deploy --prod=false
-
-# Or via Vercel dashboard: Settings → Git → Deployments
-```
-
-Vercel redeploys automatically when code is pushed or merged.
+To view or re-trigger a specific deployment: Vercel dashboard → Deployments → Create Deployment → enter branch name.
 
 ### 6. Smoke verification
 
@@ -134,14 +133,9 @@ See [TESTING.md](./TESTING.md) for detailed acceptance checklist.
 
 ### 7. Production deployment
 
-Production deploys happen only after a successful merge to `main`.
+Production deployments are triggered automatically by Vercel when a PR merges to `main`. No manual deploy command is needed.
 
-```bash
-# After merge and all secrets configured
-vercel deploy --prod
-```
-
-Or via Vercel dashboard: Production deployments run once the build is complete.
+**Explicit gate — migrations must precede traffic**: If the PR introduces a database migration, run `npm run db:migrate` (with `DATABASE_DIRECT_URL` pointing to the production `main` branch) **before merging** the PR. Vercel deploys immediately on merge; migrations must be in place first so the deployed code finds the correct schema.
 
 **Pre-production checklist**:
 - All smoke tests pass against production build (`npm test`)
@@ -174,15 +168,17 @@ Users/sessions copied from production into development branches must never happe
 If production has a critical issue post-deployment:
 
 1. **Identify the commit**: `git log main --oneline | head`
-2. **Revert PR**:
+2. **Create a revert branch** and open a PR:
    ```bash
+   git checkout -b revert/bad-commit-sha main
    git revert <commit-sha>
-   git push origin main
+   git push origin revert/bad-commit-sha
+   gh pr create --title "revert: <summary>" --body "Reverts <commit-sha>. Reason: <describe issue>"
    ```
-3. **Re-deploy** (Vercel redeploys from `main` automatically or via manual trigger).
+3. **Merge the revert PR** — Vercel redeploys `main` automatically once merged.
 4. **Verify rollback**: Confirm previous behavior restored and no data corruption.
 
-No force-push to `main`. All rollbacks go through new PRs.
+Never push directly to `main` or force-push. All rollbacks go through a revert branch PR.
 
 ## Branch lifecycle
 

@@ -64,7 +64,7 @@ Then open http://localhost:3000 and repeat manual tests above.
 
 ### Automated smoke suite
 
-The Playwright test suite runs 38 test cases across two projects (desktop, mobile):
+The Playwright test suite runs across two projects (desktop, mobile). See `tests/smoke.spec.ts` for the current test list — do not rely on a hardcoded count here.
 
 ```bash
 npm run build       # Must build first; smoke suite runs against build output
@@ -176,7 +176,7 @@ Complete this checklist after deploying to preview or production:
 - [ ] **Invalid course ID**: Navigate to `/courses/invalid-id`, confirm error or 404 message
 - [ ] **Invalid instructor ID**: Navigate to `/instructors/invalid-id`, confirm error or 404 message
 - [ ] **No compare selections**: Visit `/compare` with empty selection, see "add universities" prompt
-- [ ] **Demo data integrity**: Confirm fixture data (7 EU universities, courses, instructors) loads completely
+- [ ] **Demo data integrity** (demo/dev branch only): Confirm fixture data loads completely; production starts empty and should show empty-state UI, not fixture data
 
 ### Browser persistence
 
@@ -252,13 +252,17 @@ When moderation lands:
 
 **Status**: Email sending and DNS verification require Resend account and domain setup. Tests listed here await configuration.
 
+**Resend test emails**: Use `@resend.dev` test addresses with your standard Resend API key — there is no separate sandbox key. Send to `delivered@resend.dev` (simulates success), `bounced@resend.dev` (hard bounce), or `complained@resend.dev` (spam complaint). Labels are supported: `delivered+scenario1@resend.dev`.
+
+**DNS records**: Resend requires DKIM records (CNAME) and SPF records (TXT/MX, or CNAME for domains created after August 2026). Add records as shown in the Resend dashboard, then use the "Verify DNS Records" button. Do not claim DNS verified until the dashboard shows the domain as verified.
+
 When Resend is configured:
-- [ ] **Verified domain DNS**: Dig records for Resend subdomain, confirm CNAME/TXT present
-- [ ] **Test email sent**: Use Resend dashboard or CLI to send test email, confirm delivery
-- [ ] **Verification email sends**: Trigger verification flow (when auth/affiliation lands), confirm email received
+- [ ] **Domain DNS added**: DNS records added per Resend dashboard instructions (DKIM + SPF)
+- [ ] **Test email sent**: Send to `delivered@resend.dev` using the Resend dashboard, confirm it appears in the Sent log
+- [ ] **Verification email sends**: Trigger verification flow (when auth/affiliation lands), confirm mock/test email received
 - [ ] **Reset email sends**: Trigger password reset, confirm email received with link
-- [ ] **Production sender domain**: Verify production uses production domain (not test)
-- [ ] **Preview sender domain**: Verify preview uses test domain (not production)
+- [ ] **Production sender domain**: Confirm production `EMAIL_FROM` uses the verified production domain
+- [ ] **Preview sender domain**: Confirm preview `EMAIL_FROM` uses the test/dev sender, not production
 
 ### Performance and monitoring — OPTIONAL
 
@@ -279,7 +283,7 @@ When running in CI environment (GitHub Actions), the suite automatically:
    - Build ensures no compilation errors
 3. **Runs smoke suite**:
    - Playwright starts fresh server (no cached state)
-   - Runs 38 test cases against desktop and mobile viewports
+   - Runs all tests in `tests/smoke.spec.ts` against desktop and mobile viewports
    - Captures traces/screenshots on failure
    - Cleans up server after tests
 4. **Uploads artifacts on failure**:
@@ -291,15 +295,12 @@ When running in CI environment (GitHub Actions), the suite automatically:
 
 **Status**: Database foundation PR in progress. Integration tests will use ephemeral PostgreSQL.
 
-When database lands, local testing will require:
-- `TEST_DATABASE_URL=postgres://localhost:5432/test_db` (or Docker Postgres)
-- New test suite: `npm run test:integration` or similar (to be documented)
+When database lands, local testing will require a `TEST_DATABASE_URL` pointing to a local or ephemeral Postgres instance. The integration test command and scope will be documented in that PR.
 
 Database tests will verify:
 - Schema migrations apply cleanly
 - Seed data loads idempotently
 - Server routes return correct data shapes
-- No N+1 queries
 - No sensitive data in public responses
 - Affiliation/identity isolation
 
@@ -307,7 +308,7 @@ Database tests will verify:
 
 | Issue | Diagnosis | Resolution |
 |---|---|---|
-| **`npm test` fails: port 3001 in use** | Previous test run didn't clean up | `lsof -ti:3001 \| xargs kill -9` then retry |
+| **`npm test` fails: port 3001 in use** | Previous test run didn't clean up | Identify the process: `lsof -ti:3001` — confirm it is a test server, then kill it: `kill $(lsof -ti:3001)`, then retry |
 | **Build fails: out of memory** | Large bundle or insufficient RAM | Increase Node heap: `NODE_OPTIONS=--max-old-space-size=4096 npm run build` |
 | **Smoke suite times out** | Server slow to start or tests hanging | Check `npm run start` works standalone; increase timeout in playwright.config.ts |
 | **Screenshot differences on CI** | Font rendering differs from local | Update snapshots if intentional, otherwise investigate font/viewport differences |
