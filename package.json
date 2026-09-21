@@ -10,9 +10,12 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "test:db": "node --import tsx --test tests/db/migrate.dbtest.ts tests/db/constraints.dbtest.ts tests/db/seed.dbtest.ts",
+    "test:catalog": "node --import tsx --test tests/catalog/queries.dbtest.ts tests/catalog/demo-ratings.dbtest.ts tests/catalog/privacy.dbtest.ts tests/catalog/demo-seed-cli.dbtest.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx db/seed-cli.ts"
+    "db:migrate:feature": "tsx db/apply-feature-migrations.ts",
+    "db:seed": "tsx db/seed-cli.ts",
+    "db:seed:demo": "tsx db/demo-ratings-seed-cli.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
