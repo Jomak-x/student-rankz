@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-import { cleanupRecipientSendLog } from "./cleanup.js";
+import { cleanupRecipientSendLog } from "./cleanup";
 
 async function main(): Promise<void> {
   // Require an explicitly exported target; do not load ambient .env files.

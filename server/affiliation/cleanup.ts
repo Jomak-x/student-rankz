@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { recipientSendLog } from "@/db/affiliation-schema";
-import type { AffiliationServiceConfig } from "./service.js";
+import type { AffiliationServiceConfig } from "./service";
 
 /**
  * Global expiry sweep, including recipients that never initiate again.

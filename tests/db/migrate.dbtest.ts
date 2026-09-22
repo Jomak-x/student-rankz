@@ -11,6 +11,7 @@ import { closeDb, createEphemeralDatabase, dropEphemeralDatabase } from "./helpe
 const migrationsFolder = path.resolve(import.meta.dirname, "../../drizzle");
 
 const EXPECTED_TABLES = [
+  "account_verifications",
   "course_offerings",
   "courses",
   "feature_migrations",
@@ -20,8 +21,10 @@ const EXPECTED_TABLES = [
   "programmes",
   "public_sample_review_ratings",
   "public_sample_reviews",
+  "recipient_send_log",
   "review_drafts",
   "universities",
+  "university_domains",
 ];
 
 test("clean migration: fresh database migrates successfully", async () => {
@@ -45,7 +48,7 @@ test("clean migration: fresh database migrates successfully", async () => {
         assert.equal(rows.rows[0].count, "0", `${table}: migration must not seed data`);
       }
       const tracked = await client.query("SELECT filename FROM feature_migrations ORDER BY filename");
-      assert.deepEqual(tracked.rows.map((row) => row.filename), ["demo-public-reviews.sql", "private-drafts.sql"]);
+      assert.deepEqual(tracked.rows.map((row) => row.filename), ["affiliation.sql", "demo-public-reviews.sql", "private-drafts.sql"]);
 
       const enums = await client.query<{ enum_name: string }>(
         `SELECT t.typname AS enum_name FROM pg_type t
@@ -70,7 +73,7 @@ test("clean migration: fresh database migrates successfully", async () => {
       const applied = await client.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
       );
-      assert.equal(applied.rows[0].count, "3");
+      assert.equal(applied.rows[0].count, "4");
     } finally {
       await client.end();
     }
@@ -97,7 +100,7 @@ test("migration is repeatable: applying again is a no-op", async () => {
       const applied = await client.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
       );
-      assert.equal(applied.rows[0].count, "3");
+      assert.equal(applied.rows[0].count, "4");
     } finally {
       await client.end();
     }

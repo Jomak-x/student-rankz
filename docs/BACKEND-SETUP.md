@@ -1,38 +1,35 @@
 # Backend setup
 
-Copy `.env.example` to `.env` for local operator commands. Keep values server-side and branch-specific.
+Copy `.env.example` to `.env` for local operator commands. Keep every value server-side and branch-specific.
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Pooled database connection used by the application |
-| `DATABASE_DIRECT_URL` | Direct migration connection; falls back to `DATABASE_URL` when blank |
-| `DATABASE_TRANSPORT` | `neon-http` or `postgres` |
-| `NEON_AUTH_BASE_URL` | Exact Managed Auth endpoint for the selected branch |
-| `NEON_AUTH_COOKIE_SECRET` | Unique secret for that branch's auth cookies |
-| `APP_ORIGIN` | Exact browser origin required for draft writes |
-| `CATALOG_MODE` | `demo` only for the explicit synthetic demo branch |
+| `DATABASE_URL` | Required runtime database connection |
+| `DATABASE_DIRECT_URL` | Preferred direct migration connection |
+| `DATABASE_TRANSPORT` | Catalog default is `neon-http`; set `postgres` for standard PostgreSQL |
+| `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET` | Exact branch Managed Auth configuration |
+| `APP_ORIGIN` | Exact origin required for private draft writes |
+| `AFFILIATION_HMAC_SECRET` | At least 32 characters for code HMAC binding |
+| `RESEND_API_KEY`, `RESEND_FROM` | Resend verification delivery adapter |
+| `CRON_SECRET` | At least 32 characters with no whitespace for internal cleanup authorization |
+| `CATALOG_MODE` | `demo` only for the synthetic demo branch |
 
-## Database and seed workflow
+Catalog runtime defaults to `neon-http`. The affiliation adapter needs interactive transactions and uses Neon WebSockets by default; when `DATABASE_TRANSPORT=postgres`, it uses node-postgres instead.
 
-Run the consolidated journal before using database-backed catalog or draft routes:
+Run migrations explicitly, outside builds and deploys:
 
 ```bash
 npm run db:migrate
 ```
 
-It applies `0000`, `0001` private drafts, and `0002` catalog sample-review tables. No feature migration command is needed for a clean installation. The migration bridge also supports a database where tracked feature assets were applied first, and upgrades a pre-bridge `0001` installation by backfilling tracking without replaying DDL. If manually applied, untracked DDL collides with the journal, stop and use a reviewed migration plan; do not adopt or delete unknown tables.
+The final integration `0003` adds `university_domains`, `account_verifications`, and `recipient_send_log`. Add domains through trusted reviewed SQL using existing university UUIDs. Do not generate IDs from email claims or expect synthetic `.example` domains to receive mail.
 
-For a confirmed synthetic demo target only:
+For a manual ledger sweep, export the intended `DATABASE_URL`, verify that target, then run:
 
 ```bash
-SEED_SCOPE=demo npm run db:seed -- --yes
-SEED_SCOPE=demo node --env-file=.env --import tsx db/demo-ratings-seed-cli.ts --yes --acknowledge-demo-data
+npm run affiliation:cleanup -- --yes
 ```
 
-The ratings seed script does not load `.env`; the explicit Node command does. Neither seed runs during build, migration, CI, or deployment. Production remains empty until approved real catalog data is available.
+The CLI requires the URL and `--yes`, accepts no recipient or cutoff options, uses the database clock, and prints only an aggregate count. It does not load `.env`; export values first. The deployed cron route needs `CRON_SECRET`, not a public caller parameter.
 
-## Runtime boundaries
-
-The catalog is database-backed and returns only public DTOs. Private drafts require a verified managed-auth session, an exact `APP_ORIGIN` for mutations, and real university/course/instructor UUID targets. Drafts are not local browser storage and do not affect public scores. Compare slugs are the only catalog browser persistence.
-
-Affiliation remains unavailable pending approval. Public review posting and AI moderation are deferred. No Neon, Auth, mail, DNS, or deployment validation is claimed here.
+The listed sources are independently approved; PR #9's final delta is pending final independent integration review and user approval. No live provider, mail, DNS, cron, or production claim is made here.

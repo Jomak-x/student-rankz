@@ -56,16 +56,17 @@ jobs:
       - name: Database tests (migration, constraints, repeatable seed)
         run: npm run test:db
 
-      # Source slices may not carry both feature scripts yet. The integrated
-      # package exposes every landed service suite.
-      - name: Affiliation service tests when present
-        run: npm run test:affiliation --if-present
+      - name: Affiliation service and retention tests
+        run: npm run test:affiliation
 
       - name: Catalog service tests
         run: npm run test:catalog
 
       - name: Migration tracking tests
         run: npm run test:migrations
+
+      - name: Verification HTTP integration with mocked external providers
+        run: npm run test:verification-integration
 
       - name: Private draft service tests
         run: npm run test:drafts
@@ -85,9 +86,6 @@ jobs:
 
       - name: Verify committed migrations apply via drizzle-kit
         run: npx drizzle-kit migrate
-
-      - name: Affiliation service tests (integration + concurrency, ephemeral PostgreSQL)
-        run: npm run test:affiliation
 
       - name: Verify seed CLI refuses to run without explicit opt-in
         run: |

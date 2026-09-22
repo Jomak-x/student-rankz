@@ -1,7 +1,5 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { Client } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 
 import {
@@ -14,17 +12,12 @@ import { universityDomains } from "@/db/affiliation-schema";
 export { dropEphemeralDatabase };
 
 const BASE_MIGRATIONS = path.resolve(import.meta.dirname, "../../drizzle");
-const AFFILIATION_SQL_PATH = path.resolve(
-  import.meta.dirname,
-  "../../db/feature-migrations/affiliation.sql",
-);
-
 export type TestDb = ReturnType<typeof drizzle<Record<string, never>>>;
 
 /**
  * Creates a fully migrated ephemeral Postgres database:
- * - applies the base Drizzle migration (directory schema)
- * - applies the affiliation feature SQL migration
+ * Applies the full ordered Drizzle journal, including the affiliation ledger.
+ * Raw feature SQL must not be replayed outside its tracking protocol.
  *
  * Each call returns an isolated database; call dropAffiliationTestDb when done.
  */
@@ -34,17 +27,6 @@ export async function createAffiliationTestDb(): Promise<{
   connectionString: string;
 }> {
   const ephemeral = await createEphemeralDatabase(BASE_MIGRATIONS);
-
-  // Apply the affiliation feature SQL after the base migration.
-  const affiliationSql = await readFile(AFFILIATION_SQL_PATH, "utf8");
-  const client = new Client({ connectionString: ephemeral.connectionString });
-  await client.connect();
-  try {
-    // pg simple query protocol executes all semicolon-separated statements.
-    await client.query(affiliationSql);
-  } finally {
-    await client.end();
-  }
 
   const db = drizzle(ephemeral.connectionString, { casing: "snake_case" });
   return { db, databaseName: ephemeral.databaseName, connectionString: ephemeral.connectionString };

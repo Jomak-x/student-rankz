@@ -1,26 +1,29 @@
-# Student Rankz architecture
-
-The Next.js App Router application reads public universities, courses, instructors, reviews, and rankings through the server-only catalog service. `readCatalog()` maps missing configuration and infrastructure failures to public notices; list queries are bounded before reaching SQL. Demo rows are stored in the database and identified as synthetic only when `CATALOG_MODE=demo`.
+# Architecture
 
 ```mermaid
 flowchart TB
-  Browser --> Pages[Next.js pages and GET filters]
-  Pages --> Catalog[server/catalog]
+  Browser --> CatalogPages[Database-backed catalog pages]
+  CatalogPages --> Catalog[Catalog service]
   Catalog --> DB[(PostgreSQL)]
-  Browser --> Composer[Authenticated review composer]
-  Composer --> DraftAPI[/api/drafts]
-  DraftAPI --> Drafts[server/drafts ownership service]
-  Drafts --> DB
-  Browser --> Compare[local compare slugs]
-  Compare --> CompareAPI[/api/catalog/compare]
-  CompareAPI --> Catalog
-  Auth[Managed Neon Auth] --> DraftAPI
+  Browser --> DraftAPI[Private draft API]
+  Browser --> Verification[Account verification pages]
+  DraftAPI --> Auth[Managed Neon Auth]
+  Verification --> Auth
+  DraftAPI --> DB
+  Verification --> Affiliation[Affiliation service]
+  Affiliation --> TxDB[Interactive transaction adapter]
+  TxDB --> DB
+  Affiliation --> Resend[Resend]
+  Cron[Vercel daily cron] --> Cleanup[/api/internal/affiliation-cleanup]
+  Cleanup --> DB
 ```
 
-The public catalog has no fixture fallback. Scores and review counts are aggregates of stored public sample reviews in demo mode. A null score is rendered honestly; rankings only use returned catalog rows.
+`DATABASE_URL` supplies runtime database access. Catalog reads use `neon-http` by default and use node-postgres when `DATABASE_TRANSPORT=postgres`. Affiliation verification requires interactive transactions, so it uses the Neon WebSocket adapter by default or node-postgres when `DATABASE_TRANSPORT=postgres`; it does not use neon-http.
 
-Drafts use verified managed-auth subjects, real catalog UUID targets, strict request validation, exact-origin checks for mutations, ownership constraints, idempotent creates, revisions, and private no-store responses. Drafts never appear in public reads or alter aggregates. Browser catalog persistence is limited to up to three compare slugs in `student-rankz-catalog-compare`.
+The affiliation service verifies control of a curated university email domain, never enrollment. It binds codes to subject, university, address, and code with `AFFILIATION_HMAC_SECRET`; records send reservations in `recipient_send_log`; and uses the database clock to prune expired reservations. It does not expose a production mock-auth path.
 
-Production starts empty. Synthetic demo/development branches come from synthetic parents in the same Neon project; no production data or identities may be copied into them. Migrations and seeds are explicit operator actions, never build or deployment steps.
+Migration `0003` is the final integration migration for `university_domains`, `account_verifications`, and `recipient_send_log`. Its domain registry is trusted operator data: each reviewed insert must use an existing university UUID and an active, vetted domain. Synthetic `.example` rows cannot establish deliverability.
 
-University affiliation remains unavailable pending approval. Public posting, publication, AI moderation, and draft-driven score changes are deferred. See [BACKEND-SETUP.md](BACKEND-SETUP.md), [PRIVATE-DRAFT-HTTP.md](PRIVATE-DRAFT-HTTP.md), and [INTEGRATION.md](INTEGRATION.md).
+The daily cleanup route removes expired ledger rows only. Pending and verified verification records retain their own lifecycle and are not swept by this job. With a daily Hobby cron, reservation retention is normally about 26 hours and can be longer after missed work; it is not a one-hour deletion guarantee.
+
+See [AFFILIATION.md](AFFILIATION.md) for route, environment, and maintenance contracts. The listed sources are independently approved; PR #9's final delta remains a draft pending final independent integration review and user approval.

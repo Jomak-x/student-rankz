@@ -5,15 +5,15 @@ import type { PgDatabase } from "drizzle-orm/pg-core";
 
 import { accountVerifications, recipientSendLog, universityDomains } from "@/db/affiliation-schema";
 import { universities } from "@/db/schema";
-import { parseEmail } from "./domain.js";
-import type { EmailTransport } from "./email.js";
+import { parseEmail } from "./domain";
+import type { EmailTransport } from "./email";
 import type {
   ConsumeError,
   ConsumeResult,
   InitiateError,
   InitiateResult,
   VerificationStatus,
-} from "./types.js";
+} from "./types";
 
 export type { ConsumeError, ConsumeResult, InitiateError, InitiateResult, VerificationStatus };
 

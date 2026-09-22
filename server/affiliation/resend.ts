@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { EmailTransport } from "./email.js";
+import type { EmailTransport } from "./email";
 
 // Production email adapter using the Resend API.
 //

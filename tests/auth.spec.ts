@@ -106,3 +106,28 @@ test("private draft account and API fail closed without configuration", async ({
     expect(response.headers()["set-cookie"]).toBeUndefined();
   }
 });
+
+test("university verification APIs fail closed without provider configuration", async ({ request }) => {
+  for (const response of [
+    await request.get("/api/affiliation"),
+    await request.post("/api/affiliation/initiate", { data: { email: "student@synthetic.example" } }),
+    await request.post("/api/affiliation/consume", { data: { email: "student@synthetic.example", code: "123456" } }),
+  ]) {
+    expect(response.status()).toBe(503);
+    expect(response.headers()["cache-control"]).toBe("private, no-store");
+    expect(response.headers()["set-cookie"]).toBeUndefined();
+    expect(await response.json()).toEqual({ error: { code: "UNAVAILABLE", message: "University verification is temporarily unavailable." } });
+  }
+});
+
+test("verification cleanup is unavailable without a cron secret and HEAD cannot trigger it", async ({ request }) => {
+  const response = await request.get("/api/internal/affiliation-cleanup", {
+    headers: { authorization: "Bearer synthetic-invalid-token" },
+  });
+  expect(response.status()).toBe(503);
+  expect(response.headers()["cache-control"]).toBe("private, no-store");
+  expect(await response.json()).toEqual({ error: "Maintenance unavailable." });
+  const head = await request.head("/api/internal/affiliation-cleanup");
+  expect(head.status()).toBe(405);
+  expect(await head.body()).toHaveLength(0);
+});

@@ -6,4 +6,6 @@ Account/sign-in captures use the production build with missing Auth configuratio
 
 The four `draft-editor`, `draft-empty`, `draft-error`, and `draft-success` images are isolated React component previews with synthetic data and mocked transport. Each has an explicit visible preview label. They do not validate live authentication or a successful database write.
 
+The six `verification-*` images use the actual verification component and production CSS with visibly labeled synthetic transport responses (`node scripts/preview-verification.mjs`). They cover empty, requested-code, success, and error states, including dark and mobile layouts. They do not validate live authentication, Resend delivery, deployed cron execution, or production configuration. The listed sources are independently approved; PR #9's final delta still requires final independent integration review, user approval, and configured-provider acceptance before readiness.
+
 All images are below 500 KB. The PR embeds raw URLs pinned to its exact source head.

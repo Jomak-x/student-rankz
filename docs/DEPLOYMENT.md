@@ -1,52 +1,82 @@
 # Deployment
 
-Student Rankz uses one Neon project. Production starts empty; demo and development branches must descend from synthetic parents, never production data or identities. The database-backed catalog renders honest unconfigured, unavailable, and empty states. `CATALOG_MODE=demo` enables the synthetic-data banner.
+Use one Neon project: production starts empty, while demo and development branches descend only from synthetic parents. No build, startup, Vercel hook, or deployment may migrate or seed a database.
 
-## Vercel and environment setup
+## Vercel setup
 
-Create a Vercel project with Git deployments enabled. Use Node.js 22 and the build command `npm run build`. Do not run migrations or seeds from the Vercel build, application startup, or Git deployment hook.
+Enable Git deployments, select Node.js 22, and set the build command to `npm run build`. Configure every environment with server-side values only:
 
-Set these server-side variables for each deployed branch:
-
-| Variable | Value/purpose |
+| Variable | Required use |
 | --- | --- |
-| `DATABASE_URL` | Pooled application database connection |
-| `DATABASE_DIRECT_URL` | Direct connection preferred by Drizzle migrations |
-| `DATABASE_TRANSPORT` | `neon-http` for Neon, or `postgres` for a standard PostgreSQL server |
-| `NEON_AUTH_BASE_URL` | Managed Auth endpoint for this exact Neon branch |
-| `NEON_AUTH_COOKIE_SECRET` | Unique server-only cookie secret for this environment |
-| `APP_ORIGIN` | Exact `https://` or `http://` browser origin, without path or trailing slash |
-| `CATALOG_MODE` | `demo` only for the explicitly synthetic demo branch; unset otherwise |
+| `DATABASE_URL` | Runtime database connection |
+| `DATABASE_DIRECT_URL` | Direct migration connection; falls back to `DATABASE_URL` |
+| `DATABASE_TRANSPORT` | `neon-http` for catalog reads by default; `postgres` for standard PostgreSQL |
+| `NEON_AUTH_BASE_URL` | Exact Managed Auth branch endpoint |
+| `NEON_AUTH_COOKIE_SECRET` | Branch-specific auth cookie secret |
+| `APP_ORIGIN` | Exact browser origin, without path or trailing slash |
+| `AFFILIATION_HMAC_SECRET` | At least 32 characters; binds verification codes |
+| `RESEND_API_KEY`, `RESEND_FROM` | Authorized Resend delivery configuration |
+| `CRON_SECRET` | At least 32 characters with no whitespace; authorizes maintenance cron |
+| `CATALOG_MODE` | `demo` only on the explicitly synthetic demo branch |
 
-Never expose these as `NEXT_PUBLIC_*` values. Production uses its own empty database and matching Auth configuration; demo and development use their own synthetic branches and matching Auth configuration.
+Never expose these through `NEXT_PUBLIC_*`. There is no mocked production-auth bypass. Production uses real provider configuration and an initially empty catalog.
 
 ## Release steps
 
-1. Obtain final integration approval for PR #9 and confirm the exact-head checks in [TESTING.md](TESTING.md).
-2. Configure the Vercel Git project, Node.js 22, `npm run build`, and the branch-specific environment table above.
-3. Outside the deployment build, apply the consolidated journal to the selected branch:
+1. Keep PR #9 as a draft until its final delta has final independent integration review and user approval. Sources `b5fb0c9` and `eed5dc9` are independently approved; that does not approve the final integrated delta.
+2. Apply the final migration outside deployment automation:
 
    ```bash
    npm run db:migrate
    ```
 
-   It applies `0000`, `0001` private drafts, and `0002` public catalog sample data. No additional feature migration command is required for a clean or bridged installation.
-4. For an explicitly confirmed synthetic demo branch only, seed directory rows and demo ratings:
+   This applies the consolidated migration sequence `0000_old_iron_fist`, `0001_private_drafts`, `0002_demo_public_reviews`, and `0003_affiliation`. Migration `0003` creates `university_domains`, `account_verifications`, and `recipient_send_log`.
+3. Populate `university_domains` only through manually reviewed operator SQL. It must select an existing university row and use the table defaults for `id` and `created_at`; never generate a UUID or infer a university from an email claim.
 
-   ```bash
-   SEED_SCOPE=demo npm run db:seed -- --yes
-   SEED_SCOPE=demo node --env-file=.env --import tsx db/demo-ratings-seed-cli.ts --yes --acknowledge-demo-data
+   ```sql
+   -- Replace both reviewed values after confirming the university controls the domain.
+   INSERT INTO public.university_domains (university_id, domain, active)
+   SELECT id, 'students.reviewed-university.edu', true
+   FROM public.universities
+   WHERE slug = 'reviewed-university-slug';
    ```
 
-   `npm run db:seed:demo` does not load `.env`; use the command above or explicitly export `DATABASE_URL` and `SEED_SCOPE=demo` first. Never seed production.
-5. Deploy through the approved Git change, then complete the configured manual acceptance checks in [TESTING.md](TESTING.md). No live check is claimed until an operator records it.
+   This is an operator procedure, not deployment automation. Synthetic `.example` domains cannot receive mail.
+4. Configure Resend and its DNS records with an authorized sender. Verify delivery only through an authorized mailbox; no delivery or DNS result is claimed by this repository.
+5. Deploy via approved Git change and complete the configured acceptance gate in [TESTING.md](TESTING.md). Do not seed production.
 
-Managed Auth needs an authorized mailbox gate before email-dependent flows are accepted. After affiliation is approved and implemented, configure Resend and its DNS records once from the provider dashboard, then verify with an authorized mailbox. Affiliation remains pending and unavailable today; mailbox control does not establish affiliation.
+## Explicit synthetic demo seeding
 
-Public posting and AI moderation are deferred. Private drafts stay private and do not alter public scores or rankings.
+Run these only after the operator verifies a synthetic demo target. Neither command runs during builds or deploys.
+
+```bash
+SEED_SCOPE=demo npm run db:seed -- --yes
+SEED_SCOPE=demo npm run db:seed:demo -- --yes --acknowledge-demo-data
+```
+
+`db/seed-cli.ts` loads `.env` when present. `db/demo-ratings-seed-cli.ts` does not, so provide `DATABASE_URL` through an exported variable or load it explicitly:
+
+```bash
+SEED_SCOPE=demo node --env-file=.env --import tsx db/demo-ratings-seed-cli.ts --yes --acknowledge-demo-data
+```
+
+The ratings command rejects production-looking runtimes but cannot prove that a URL targets a demo database. The operator must verify the target before running either command.
+
+## Daily recipient-ledger cleanup
+
+`vercel.json` schedules `GET /api/internal/affiliation-cleanup` at `0 4 * * *`. The endpoint accepts only `Authorization: Bearer <CRON_SECRET>`: no query parameters or body. It returns `200 {"deleted":N}` or generic `401`, `503`, or `400` errors; `HEAD` returns `405` and does not run cleanup.
+
+The cleanup uses the database clock to delete only `recipient_send_log` entries at least one hour old. It retains pending and verified `account_verifications` and has no caller-controlled recipient or retention cutoff. On Hobby, Vercel permits once-daily jobs and executes with hour-level precision, so a normal sweep can retain reservations for roughly 26 hours; missed jobs can extend retention. It does not promise one-hour deletion. See [Vercel cron usage and pricing](https://vercel.com/docs/cron-jobs/usage-and-pricing) and [cron management](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+For a repeatable manual sweep, explicitly export the target URL and confirm it before invoking the existing CLI:
+
+```bash
+export DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/DATABASE'
+npm run affiliation:cleanup -- --yes
+```
+
+The command runs `server/affiliation/cleanup-cli.ts`, does not load `.env`, requires exactly `--yes`, and accepts no recipient or cutoff argument.
 
 ## Rollback
 
-Use a reviewed revert PR for a code regression. A code revert does not undo migrations or seeded data; handle database recovery through a separately reviewed forward plan. Do not push directly to `main`.
-
-No deployment, provider, DNS, authorized-mailbox, or production validation is claimed by this document.
+Use a reviewed revert PR for code. Recover data through a separately reviewed forward migration; never push directly to `main` or delete production data as a rollback shortcut.

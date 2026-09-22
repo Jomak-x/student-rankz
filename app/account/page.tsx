@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { CircleUserRound, Mail, ShieldAlert } from "lucide-react";
 
+import { VerificationPanel } from "@/components/affiliation/verification-panel";
 import { AuthUnavailable } from "@/components/auth/auth-unavailable";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import {
@@ -66,7 +67,7 @@ export default async function AccountPage() {
               <p className="leading-relaxed text-muted-foreground">
                 This account confirms your sign-in identity. It does not confirm
                 enrollment, student status, or affiliation with any university.
-                University verification will be a separate flow.
+                Mailbox verification below only confirms control of an email address.
               </p>
             </div>
           </div>
@@ -75,6 +76,7 @@ export default async function AccountPage() {
           <SignOutButton />
         </CardContent>
       </Card>
+      <VerificationPanel />
     </div>
   );
 }
