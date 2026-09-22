@@ -101,3 +101,6 @@ CREATE INDEX IF NOT EXISTS "recipient_send_log_email_sent_idx"
 
 CREATE INDEX IF NOT EXISTS "recipient_send_log_challenge_idx"
     ON "recipient_send_log" ("challenge_id");
+
+CREATE INDEX IF NOT EXISTS "recipient_send_log_sent_idx"
+    ON "recipient_send_log" ("sent_at");

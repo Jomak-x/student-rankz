@@ -25,6 +25,7 @@ export const recipientSendLog = pgTable(
   (t) => [
     index("recipient_send_log_email_sent_idx").on(t.recipientEmail, t.sentAt),
     index("recipient_send_log_challenge_idx").on(t.challengeId),
+    index("recipient_send_log_sent_idx").on(t.sentAt),
   ],
 );
 
