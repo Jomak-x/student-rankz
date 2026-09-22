@@ -1,54 +1,25 @@
-import type { Review } from "@/lib/demo-data";
-import { StarRating } from "./star-rating";
+import type { CatalogSampleReview } from "@/lib/catalog-types";
 import { Badge } from "./ui/badge";
 import { Card, CardContent } from "./ui/card";
 
-interface ReviewCardProps {
-  review: Review;
-}
-
-export function ReviewCard({ review }: ReviewCardProps) {
+export function ReviewCard({ review }: { review: CatalogSampleReview }) {
   return (
     <Card>
-      <CardContent className="pt-4 pb-4">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <div>
-            <p className="font-medium text-sm">{review.title}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
+      <CardContent className="space-y-3 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="break-words text-sm font-medium">{review.title}</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
               {review.authorAlias}
-              {review.programme && ` · ${review.programme}`}
-              {" · "}
-              {review.year}
+              {review.programmeLabel && ` · ${review.programmeLabel}`}
+              {review.experienceYear !== null && ` · ${review.experienceYear}`}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <StarRating value={review.rating} size="sm" showValue />
-          </div>
+          <Badge variant="secondary" className="text-xs font-normal">Synthetic sample review</Badge>
         </div>
-        <p className="text-sm leading-relaxed text-foreground/90">{review.body}</p>
-        {(review.pros || review.cons) && (
-          <div className="mt-3 flex flex-col gap-1.5">
-            {review.pros && (
-              <p className="text-xs text-muted-foreground">
-                <span className="text-green-600 dark:text-green-400 font-medium">+ </span>
-                {review.pros}
-              </p>
-            )}
-            {review.cons && (
-              <p className="text-xs text-muted-foreground">
-                <span className="text-destructive font-medium">– </span>
-                {review.cons}
-              </p>
-            )}
-          </div>
-        )}
-        {review.verified && (
-          <div className="mt-2">
-            <Badge variant="secondary" className="text-xs font-normal">
-              Demo · sample review
-            </Badge>
-          </div>
-        )}
+        <p className="whitespace-pre-line break-words text-sm leading-relaxed text-foreground/90">{review.body}</p>
+        {review.pros && <p className="break-words text-xs text-muted-foreground"><span className="font-medium text-primary">Pros: </span>{review.pros}</p>}
+        {review.cons && <p className="break-words text-xs text-muted-foreground"><span className="font-medium">Cons: </span>{review.cons}</p>}
       </CardContent>
     </Card>
   );

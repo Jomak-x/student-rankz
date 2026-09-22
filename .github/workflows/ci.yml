@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "polly/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,12 +15,15 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: .
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -35,6 +38,9 @@ jobs:
 
       - name: Type-check
         run: npm run typecheck
+
+      - name: Offline auth tests
+        run: npm run test:auth
 
       - name: Build
         run: npm run build

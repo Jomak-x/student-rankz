@@ -1,67 +1,25 @@
-# Student Rankz — Frontend MVP
+# Student Rankz
 
-A Next.js prototype for EU university, course, and instructor experience reviews. All universities and instructors are real institutions; scores and reviews are illustrative sample data only — not real rankings or published reviews.
+Student Rankz is a Next.js application for university, course, and instructor reviews. Public catalog pages use database reads. Production starts empty; explicit demo branches use synthetic catalog rows and sample ratings. Private drafts and university-email verification use authenticated server APIs. Public posting and AI moderation are deferred.
 
-## Prerequisites
-
-- Node.js 22 (LTS)
-- npm 10
-
-## Quick start
+## Local checks
 
 ```bash
 npm ci
-npm run dev      # http://localhost:3000
+npm run lint
+npm run typecheck
+npm run build
+PLAYWRIGHT_PORT=3127 npm test
 ```
 
-## Commands
+For disposable database suites, export `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:63346/postgres` and run `test:db`, `test:auth`, `test:drafts`, `test:catalog`, `test:migrations`, `test:affiliation`, `test:verification-integration`, and `test:integration` as applicable. See [docs/TESTING.md](docs/TESTING.md).
 
-| Command | Description |
-|---|---|
-| `npm ci` | Install exact locked dependencies |
-| `npm run dev` | Dev server at http://localhost:3000 |
-| `npm run build` | Production build (static generation) |
-| `npm run start` | Serve production build at http://localhost:3000 |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | TypeScript (`tsc --noEmit`) |
-| `npm test` | Playwright smoke suite (requires prior `npm run build`; serves on port 3001) |
+## Runtime and release boundary
 
-## Pages
+`DATABASE_URL` is required by runtime database features. Catalog reads default to `DATABASE_TRANSPORT=neon-http`; set `postgres` for standard PostgreSQL. Affiliation verification uses a transaction-capable Neon WebSocket adapter by default, or node-postgres when `DATABASE_TRANSPORT=postgres`.
 
-| Route | Description |
-|---|---|
-| `/` | Home — search + featured university cards |
-| `/universities` | List with country filter and sort |
-| `/universities/[id]` | Detail: category scores, reviews, courses, instructors |
-| `/courses` | Course list with level filter |
-| `/courses/[id]` | Course detail with instructor tab |
-| `/instructors/[id]` | Instructor detail and reviews |
-| `/compare` | Side-by-side comparison of up to 3 universities |
+Set branch-specific Managed Auth and draft origin values: `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, and exact `APP_ORIGIN`. Affiliation also requires `AFFILIATION_HMAC_SECRET` (at least 32 characters), `RESEND_API_KEY`, and `RESEND_FROM`; scheduled cleanup requires `CRON_SECRET` (at least 32 characters, no whitespace).
 
-## Runtime versions
+Run `npm run db:migrate` outside builds and deploys. The final PR #9 migration `0003` creates `university_domains`, `account_verifications`, and `recipient_send_log`. Demo seeding is explicit and never runs in builds or deployments. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/AFFILIATION.md](docs/AFFILIATION.md), and [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
-- Next.js 16.3.5 (App Router, static generation)
-- React 19
-- TypeScript 5
-- Tailwind CSS v4
-- shadcn/ui base-nova (base-ui primitives)
-- Playwright latest
-
-## Demo capabilities and limits
-
-- **Data**: 7 EU universities, sample courses and instructors with illustrative scores and fictional student reviews.
-- **Review composer**: Saves drafts to `localStorage` only. Nothing is published, sent to a server, or counted in displayed totals.
-- **Compare**: Selection persists in `localStorage` across page loads. Capped at 3 universities.
-- **Theme**: Light / dark / system preference persists via `next-themes`.
-- **No auth, no backend, no environment variables required** — builds and runs entirely offline.
-
-## CI
-
-Every PR and push to `main` runs lint → typecheck → build → Playwright smoke tests (38 cases, desktop + mobile Chromium). Playwright traces and screenshots are uploaded as artifacts on failure. See [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) for setup and bootstrap steps.
-
-## Related docs
-
-- [docs/FRONTEND.md](docs/FRONTEND.md) — directory map, routes, fixture types, browser persistence, theme, shadcn/base-ui notes, npm commands, screenshot workflow, known limits
-- [docs/REPOSITORY-WORKFLOW.md](docs/REPOSITORY-WORKFLOW.md) — CI workflows, labels, branch protection bootstrap, PR process
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system architecture (backend worker, arriving in a separate PR)
-- [docs/BACKEND-SETUP.md](docs/BACKEND-SETUP.md) — backend setup guide (backend worker, arriving in a separate PR)
+Sources `b5fb0c9` and `eed5dc9` are independently approved. PR #9 is the sole merge candidate after final independent integration review and user approval; source PRs are closed as superseded. No live provider, delivery, cron, or production claim is made here.

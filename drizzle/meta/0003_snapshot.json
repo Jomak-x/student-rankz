@@ -1,0 +1,1806 @@
+{
+  "id": "5e4ed3f3-57e6-4c0a-8106-f074ac319e93",
+  "prevId": "e9e778ae-7d33-4f97-9575-cf1c077ba1d0",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.course_offerings": {
+      "name": "course_offerings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "course_id": {
+          "name": "course_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "academic_year": {
+          "name": "academic_year",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "term": {
+          "name": "term",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starts_on": {
+          "name": "starts_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ends_on": {
+          "name": "ends_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "course_offerings_course_idx": {
+          "name": "course_offerings_course_idx",
+          "columns": [
+            {
+              "expression": "course_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "course_offerings_university_id_universities_id_fk": {
+          "name": "course_offerings_university_id_universities_id_fk",
+          "tableFrom": "course_offerings",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "course_offerings_course_fkey": {
+          "name": "course_offerings_course_fkey",
+          "tableFrom": "course_offerings",
+          "tableTo": "courses",
+          "columnsFrom": [
+            "course_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "course_offerings_course_year_term_unique": {
+          "name": "course_offerings_course_year_term_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "course_id",
+            "academic_year",
+            "term"
+          ]
+        },
+        "course_offerings_id_university_unique": {
+          "name": "course_offerings_id_university_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "university_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "course_offerings_academic_year_check": {
+          "name": "course_offerings_academic_year_check",
+          "value": "\"course_offerings\".\"academic_year\" between 1900 and 2100"
+        },
+        "course_offerings_dates_check": {
+          "name": "course_offerings_dates_check",
+          "value": "\"course_offerings\".\"ends_on\" is null or \"course_offerings\".\"starts_on\" is null or \"course_offerings\".\"ends_on\" >= \"course_offerings\".\"starts_on\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.courses": {
+      "name": "courses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "department": {
+          "name": "department",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credits": {
+          "name": "credits",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "study_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "courses_university_idx": {
+          "name": "courses_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "courses_university_id_universities_id_fk": {
+          "name": "courses_university_id_universities_id_fk",
+          "tableFrom": "courses",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "courses_university_code_unique": {
+          "name": "courses_university_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "university_id",
+            "code"
+          ]
+        },
+        "courses_id_university_unique": {
+          "name": "courses_id_university_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "university_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "courses_credits_check": {
+          "name": "courses_credits_check",
+          "value": "\"courses\".\"credits\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.instructors": {
+      "name": "instructors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "full_name": {
+          "name": "full_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "department": {
+          "name": "department",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bio": {
+          "name": "bio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "instructors_university_idx": {
+          "name": "instructors_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "instructors_university_id_universities_id_fk": {
+          "name": "instructors_university_id_universities_id_fk",
+          "tableFrom": "instructors",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "instructors_university_slug_unique": {
+          "name": "instructors_university_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "university_id",
+            "slug"
+          ]
+        },
+        "instructors_id_university_unique": {
+          "name": "instructors_id_university_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "university_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.offering_instructors": {
+      "name": "offering_instructors",
+      "schema": "",
+      "columns": {
+        "offering_id": {
+          "name": "offering_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instructor_id": {
+          "name": "instructor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'lecturer'"
+        }
+      },
+      "indexes": {
+        "offering_instructors_instructor_idx": {
+          "name": "offering_instructors_instructor_idx",
+          "columns": [
+            {
+              "expression": "instructor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "offering_instructors_university_id_universities_id_fk": {
+          "name": "offering_instructors_university_id_universities_id_fk",
+          "tableFrom": "offering_instructors",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "offering_instructors_offering_fkey": {
+          "name": "offering_instructors_offering_fkey",
+          "tableFrom": "offering_instructors",
+          "tableTo": "course_offerings",
+          "columnsFrom": [
+            "offering_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "offering_instructors_instructor_fkey": {
+          "name": "offering_instructors_instructor_fkey",
+          "tableFrom": "offering_instructors",
+          "tableTo": "instructors",
+          "columnsFrom": [
+            "instructor_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "offering_instructors_pkey": {
+          "name": "offering_instructors_pkey",
+          "nullsNotDistinct": false,
+          "columns": [
+            "offering_id",
+            "instructor_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.programme_courses": {
+      "name": "programme_courses",
+      "schema": "",
+      "columns": {
+        "programme_id": {
+          "name": "programme_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_id": {
+          "name": "course_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "programme_course_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "programme_courses_course_idx": {
+          "name": "programme_courses_course_idx",
+          "columns": [
+            {
+              "expression": "course_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "programme_courses_university_id_universities_id_fk": {
+          "name": "programme_courses_university_id_universities_id_fk",
+          "tableFrom": "programme_courses",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "programme_courses_programme_fkey": {
+          "name": "programme_courses_programme_fkey",
+          "tableFrom": "programme_courses",
+          "tableTo": "programmes",
+          "columnsFrom": [
+            "programme_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "programme_courses_course_fkey": {
+          "name": "programme_courses_course_fkey",
+          "tableFrom": "programme_courses",
+          "tableTo": "courses",
+          "columnsFrom": [
+            "course_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "programme_courses_pkey": {
+          "name": "programme_courses_pkey",
+          "columns": [
+            "programme_id",
+            "course_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.programmes": {
+      "name": "programmes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "study_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "programmes_university_idx": {
+          "name": "programmes_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "programmes_university_id_universities_id_fk": {
+          "name": "programmes_university_id_universities_id_fk",
+          "tableFrom": "programmes",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "programmes_university_slug_unique": {
+          "name": "programmes_university_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "university_id",
+            "slug"
+          ]
+        },
+        "programmes_id_university_unique": {
+          "name": "programmes_id_university_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "university_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.universities": {
+      "name": "universities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "slug": {
+          "name": "slug",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "city": {
+          "name": "city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country": {
+          "name": "country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_code": {
+          "name": "country_code",
+          "type": "varchar(2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "founded_year": {
+          "name": "founded_year",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "university_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'public'"
+        },
+        "website_url": {
+          "name": "website_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "student_count": {
+          "name": "student_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "universities_slug_unique": {
+          "name": "universities_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "universities_founded_year_check": {
+          "name": "universities_founded_year_check",
+          "value": "\"universities\".\"founded_year\" between 800 and 2100"
+        },
+        "universities_student_count_check": {
+          "name": "universities_student_count_check",
+          "value": "\"universities\".\"student_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.review_drafts": {
+      "name": "review_drafts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_subject": {
+          "name": "owner_subject",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "draft_target_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_id": {
+          "name": "course_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "instructor_id": {
+          "name": "instructor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(140)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_request_key": {
+          "name": "client_request_key",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "review_drafts_owner_updated_idx": {
+          "name": "review_drafts_owner_updated_idx",
+          "columns": [
+            {
+              "expression": "owner_subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "review_drafts_university_idx": {
+          "name": "review_drafts_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "review_drafts_course_idx": {
+          "name": "review_drafts_course_idx",
+          "columns": [
+            {
+              "expression": "course_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "review_drafts_instructor_idx": {
+          "name": "review_drafts_instructor_idx",
+          "columns": [
+            {
+              "expression": "instructor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "review_drafts_university_fkey": {
+          "name": "review_drafts_university_fkey",
+          "tableFrom": "review_drafts",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "review_drafts_course_fkey": {
+          "name": "review_drafts_course_fkey",
+          "tableFrom": "review_drafts",
+          "tableTo": "courses",
+          "columnsFrom": [
+            "course_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "review_drafts_instructor_fkey": {
+          "name": "review_drafts_instructor_fkey",
+          "tableFrom": "review_drafts",
+          "tableTo": "instructors",
+          "columnsFrom": [
+            "instructor_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "review_drafts_owner_request_key_unique": {
+          "name": "review_drafts_owner_request_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "owner_subject",
+            "client_request_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "review_drafts_owner_check": {
+          "name": "review_drafts_owner_check",
+          "value": "char_length(\"review_drafts\".\"owner_subject\") between 1 and 255"
+        },
+        "review_drafts_client_key_check": {
+          "name": "review_drafts_client_key_check",
+          "value": "char_length(\"review_drafts\".\"client_request_key\") between 1 and 100"
+        },
+        "review_drafts_title_check": {
+          "name": "review_drafts_title_check",
+          "value": "\"review_drafts\".\"title\" is null or char_length(\"review_drafts\".\"title\") between 1 and 140"
+        },
+        "review_drafts_body_check": {
+          "name": "review_drafts_body_check",
+          "value": "char_length(\"review_drafts\".\"body\") between 1 and 5000"
+        },
+        "review_drafts_rating_check": {
+          "name": "review_drafts_rating_check",
+          "value": "\"review_drafts\".\"rating\" between 1 and 5"
+        },
+        "review_drafts_revision_check": {
+          "name": "review_drafts_revision_check",
+          "value": "\"review_drafts\".\"revision\" >= 1"
+        },
+        "review_drafts_target_check": {
+          "name": "review_drafts_target_check",
+          "value": "(\"review_drafts\".\"target_type\" = 'university' and \"review_drafts\".\"course_id\" is null and \"review_drafts\".\"instructor_id\" is null)\n        or (\"review_drafts\".\"target_type\" = 'course' and \"review_drafts\".\"course_id\" is not null and \"review_drafts\".\"instructor_id\" is null)\n        or (\"review_drafts\".\"target_type\" = 'instructor' and \"review_drafts\".\"course_id\" is null and \"review_drafts\".\"instructor_id\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.public_sample_review_ratings": {
+      "name": "public_sample_review_ratings",
+      "schema": "",
+      "columns": {
+        "review_id": {
+          "name": "review_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "public_sample_review_ratings_review_fkey": {
+          "name": "public_sample_review_ratings_review_fkey",
+          "tableFrom": "public_sample_review_ratings",
+          "tableTo": "public_sample_reviews",
+          "columnsFrom": [
+            "review_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "public_sample_review_ratings_pkey": {
+          "name": "public_sample_review_ratings_pkey",
+          "columns": [
+            "review_id",
+            "dimension"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "public_sample_review_ratings_dimension_check": {
+          "name": "public_sample_review_ratings_dimension_check",
+          "value": "\"public_sample_review_ratings\".\"dimension\" in (\n        'overall', 'teaching', 'support', 'facilities', 'administration', 'value', 'social_life',\n        'workload', 'organisation', 'clarity', 'assessment_fairness', 'expertise', 'engagement'\n      )"
+        },
+        "public_sample_review_ratings_value_check": {
+          "name": "public_sample_review_ratings_value_check",
+          "value": "\"public_sample_review_ratings\".\"value\" between 1 and 5"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.public_sample_reviews": {
+      "name": "public_sample_reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject_type": {
+          "name": "subject_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "course_id": {
+          "name": "course_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "instructor_id": {
+          "name": "instructor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "author_alias": {
+          "name": "author_alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "programme_label": {
+          "name": "programme_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "experience_year": {
+          "name": "experience_year",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pros": {
+          "name": "pros",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cons": {
+          "name": "cons",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'demo'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "public_sample_reviews_university_subject_idx": {
+          "name": "public_sample_reviews_university_subject_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subject_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "published_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "public_sample_reviews_course_idx": {
+          "name": "public_sample_reviews_course_idx",
+          "columns": [
+            {
+              "expression": "course_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "published_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"public_sample_reviews\".\"course_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "public_sample_reviews_instructor_idx": {
+          "name": "public_sample_reviews_instructor_idx",
+          "columns": [
+            {
+              "expression": "instructor_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "published_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"public_sample_reviews\".\"instructor_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "public_sample_reviews_university_fkey": {
+          "name": "public_sample_reviews_university_fkey",
+          "tableFrom": "public_sample_reviews",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "public_sample_reviews_course_fkey": {
+          "name": "public_sample_reviews_course_fkey",
+          "tableFrom": "public_sample_reviews",
+          "tableTo": "courses",
+          "columnsFrom": [
+            "course_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "public_sample_reviews_instructor_fkey": {
+          "name": "public_sample_reviews_instructor_fkey",
+          "tableFrom": "public_sample_reviews",
+          "tableTo": "instructors",
+          "columnsFrom": [
+            "instructor_id",
+            "university_id"
+          ],
+          "columnsTo": [
+            "id",
+            "university_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "public_sample_reviews_subject_type_check": {
+          "name": "public_sample_reviews_subject_type_check",
+          "value": "\"public_sample_reviews\".\"subject_type\" in ('university', 'course', 'instructor')"
+        },
+        "public_sample_reviews_subject_shape_check": {
+          "name": "public_sample_reviews_subject_shape_check",
+          "value": "(\"public_sample_reviews\".\"subject_type\" = 'university' and \"public_sample_reviews\".\"course_id\" is null and \"public_sample_reviews\".\"instructor_id\" is null)\n        or (\"public_sample_reviews\".\"subject_type\" = 'course' and \"public_sample_reviews\".\"course_id\" is not null and \"public_sample_reviews\".\"instructor_id\" is null)\n        or (\"public_sample_reviews\".\"subject_type\" = 'instructor' and \"public_sample_reviews\".\"course_id\" is null and \"public_sample_reviews\".\"instructor_id\" is not null)"
+        },
+        "public_sample_reviews_author_alias_length_check": {
+          "name": "public_sample_reviews_author_alias_length_check",
+          "value": "char_length(\"public_sample_reviews\".\"author_alias\") between 1 and 80"
+        },
+        "public_sample_reviews_programme_label_length_check": {
+          "name": "public_sample_reviews_programme_label_length_check",
+          "value": "\"public_sample_reviews\".\"programme_label\" is null or char_length(\"public_sample_reviews\".\"programme_label\") <= 120"
+        },
+        "public_sample_reviews_experience_year_check": {
+          "name": "public_sample_reviews_experience_year_check",
+          "value": "\"public_sample_reviews\".\"experience_year\" is null or \"public_sample_reviews\".\"experience_year\" between 1900 and 2100"
+        },
+        "public_sample_reviews_title_length_check": {
+          "name": "public_sample_reviews_title_length_check",
+          "value": "char_length(\"public_sample_reviews\".\"title\") between 1 and 200"
+        },
+        "public_sample_reviews_body_length_check": {
+          "name": "public_sample_reviews_body_length_check",
+          "value": "char_length(\"public_sample_reviews\".\"body\") between 1 and 4000"
+        },
+        "public_sample_reviews_pros_length_check": {
+          "name": "public_sample_reviews_pros_length_check",
+          "value": "\"public_sample_reviews\".\"pros\" is null or char_length(\"public_sample_reviews\".\"pros\") <= 1000"
+        },
+        "public_sample_reviews_cons_length_check": {
+          "name": "public_sample_reviews_cons_length_check",
+          "value": "\"public_sample_reviews\".\"cons\" is null or char_length(\"public_sample_reviews\".\"cons\") <= 1000"
+        },
+        "public_sample_reviews_provenance_check": {
+          "name": "public_sample_reviews_provenance_check",
+          "value": "\"public_sample_reviews\".\"provenance\" = 'demo'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.account_verifications": {
+      "name": "account_verifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_subject": {
+          "name": "account_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_address": {
+          "name": "email_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "challenge_id": {
+          "name": "challenge_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delivery_state": {
+          "name": "delivery_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code_hmac": {
+          "name": "code_hmac",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code_expires_at": {
+          "name": "code_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "send_count": {
+          "name": "send_count",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "send_window_starts_at": {
+          "name": "send_window_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "verified": {
+          "name": "verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "account_verifications_subject_idx": {
+          "name": "account_verifications_subject_idx",
+          "columns": [
+            {
+              "expression": "account_subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_verifications_university_idx": {
+          "name": "account_verifications_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_verifications_email_delivery_idx": {
+          "name": "account_verifications_email_delivery_idx",
+          "columns": [
+            {
+              "expression": "email_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "delivery_state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "account_verifications_university_id_universities_id_fk": {
+          "name": "account_verifications_university_id_universities_id_fk",
+          "tableFrom": "account_verifications",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "account_verifications_account_university_unique": {
+          "name": "account_verifications_account_university_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_subject",
+            "university_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "account_verifications_attempt_count_check": {
+          "name": "account_verifications_attempt_count_check",
+          "value": "\"account_verifications\".\"attempt_count\" >= 0"
+        },
+        "account_verifications_send_count_check": {
+          "name": "account_verifications_send_count_check",
+          "value": "\"account_verifications\".\"send_count\" >= 0"
+        },
+        "account_verifications_delivery_state_check": {
+          "name": "account_verifications_delivery_state_check",
+          "value": "\"account_verifications\".\"delivery_state\" IS NULL OR \"account_verifications\".\"delivery_state\" IN ('pending', 'sent')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.recipient_send_log": {
+      "name": "recipient_send_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "recipient_email": {
+          "name": "recipient_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "challenge_id": {
+          "name": "challenge_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "recipient_send_log_email_sent_idx": {
+          "name": "recipient_send_log_email_sent_idx",
+          "columns": [
+            {
+              "expression": "recipient_email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sent_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "recipient_send_log_challenge_idx": {
+          "name": "recipient_send_log_challenge_idx",
+          "columns": [
+            {
+              "expression": "challenge_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.university_domains": {
+      "name": "university_domains",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "university_id": {
+          "name": "university_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "university_domains_university_idx": {
+          "name": "university_domains_university_idx",
+          "columns": [
+            {
+              "expression": "university_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "university_domains_domain_active_idx": {
+          "name": "university_domains_domain_active_idx",
+          "columns": [
+            {
+              "expression": "domain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "active",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "university_domains_university_id_universities_id_fk": {
+          "name": "university_domains_university_id_universities_id_fk",
+          "tableFrom": "university_domains",
+          "tableTo": "universities",
+          "columnsFrom": [
+            "university_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "university_domains_domain_unique": {
+          "name": "university_domains_domain_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "domain"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "university_domains_domain_format_check": {
+          "name": "university_domains_domain_format_check",
+          "value": "\"university_domains\".\"domain\" ~ '^([a-z0-9]([a-z0-9-]*[a-z0-9])?)(\\.([a-z0-9]([a-z0-9-]*[a-z0-9])?))+$'\n          AND \"university_domains\".\"domain\" !~ '^[0-9]+(\\.[0-9]+){3}$'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.programme_course_status": {
+      "name": "programme_course_status",
+      "schema": "public",
+      "values": [
+        "required",
+        "elective"
+      ]
+    },
+    "public.study_level": {
+      "name": "study_level",
+      "schema": "public",
+      "values": [
+        "bachelor",
+        "master",
+        "phd"
+      ]
+    },
+    "public.university_type": {
+      "name": "university_type",
+      "schema": "public",
+      "values": [
+        "public",
+        "private",
+        "technical"
+      ]
+    },
+    "public.draft_target_type": {
+      "name": "draft_target_type",
+      "schema": "public",
+      "values": [
+        "university",
+        "course",
+        "instructor"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

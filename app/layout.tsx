@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     template: "%s · Student Rankz",
   },
   description:
-    "Student-experience reviews and rankings for EU universities and courses. Demo prototype — sample data only.",
+    "Student-experience reviews and rankings for EU universities and courses. Browse public directory records. Ratings, where available, are labelled sample data.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -40,7 +40,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           enableSystem
           disableTransitionOnChange
         >
-          <DemoBanner />
+          {process.env.CATALOG_MODE === "demo" ? <DemoBanner /> : null}
           <Header />
           <main className="flex-1">{children}</main>
           <Toaster />

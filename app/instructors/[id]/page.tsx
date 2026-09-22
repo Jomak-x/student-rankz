@@ -1,44 +1,33 @@
+import { cache } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import {
-  getInstructor,
-  getUniversity,
-  getCourse,
-  getReviewsByTarget,
-  instructors,
-} from "@/lib/demo-data";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { StarRating } from "@/components/star-rating";
+import { GraduationCap } from "lucide-react";
+import { getCatalogService } from "@/server/catalog";
+import { readCatalog } from "@/server/catalog/read";
+import { CatalogNotice } from "@/components/catalog/catalog-notice";
+import { DetailRating, DetailReviews, DetailShell, detailPageNumber, type DetailPageProps } from "@/components/catalog/detail";
 import { ScoreBar } from "@/components/score-bar";
-import { ReviewCard } from "@/components/review-card";
-import { ReviewComposer } from "@/components/review-composer";
-import Link from "next/link";
-import { BookOpen, GraduationCap } from "lucide-react";
+import { ServerReviewComposer } from "@/components/server-review-composer";
+import { Separator } from "@/components/ui/separator";
 
-type Props = { params: Promise<{ id: string }> };
+export const dynamic = "force-dynamic";
+const loadInstructor = cache((id: string) => readCatalog(() => getCatalogService().getInstructorDetail(id)));
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: DetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const inst = getInstructor(id);
-  if (!inst) return { title: "Not found" };
-  return { title: `${inst.name} · Instructor Reviews` };
+  const result = await loadInstructor(id);
+  return { title: result.status === "ready" ? result.data ? `${result.data.fullName} · Instructor Reviews` : "Instructor not found" : "Instructor directory unavailable" };
 }
 
-export function generateStaticParams() {
-  return instructors.map((i) => ({ id: i.id }));
-}
-
-export default async function InstructorPage({ params }: Props) {
-  const { id } = await params;
-  const inst = getInstructor(id);
-  if (!inst) notFound();
-
-  const uni = getUniversity(inst.universityId);
-  const instCourses = inst.courses.map(getCourse).filter(Boolean);
-  const instReviews = getReviewsByTarget("instructor", id);
-
-  const scoreLabels: { key: keyof typeof inst.scores; label: string }[] = [
+export default async function InstructorPage({ params, searchParams }: DetailPageProps) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const result = await loadInstructor(id);
+  if (result.status !== "ready") return <DetailShell><CatalogNotice kind={result.status} /></DetailShell>;
+  const instructor = result.data;
+  if (!instructor) notFound();
+  const reviews = await readCatalog(() => getCatalogService().listInstructorReviews(instructor.id, { page: detailPageNumber(query.reviewPage) }));
+  const scoreLabels: { key: keyof typeof instructor.scores; label: string }[] = [
     { key: "clarity", label: "Explanation clarity" },
     { key: "support", label: "Student support" },
     { key: "expertise", label: "Subject expertise" },
@@ -46,126 +35,34 @@ export default async function InstructorPage({ params }: Props) {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl px-4 sm:px-6 py-8">
-      {/* Breadcrumb */}
-      <nav className="text-xs text-muted-foreground mb-4 flex items-center gap-1.5 flex-wrap">
-        <Link href="/universities" className="hover:text-foreground">
-          Universities
-        </Link>
-        {uni && (
-          <>
-            <span>/</span>
-            <Link href={`/universities/${uni.id}`} className="hover:text-foreground">
-              {uni.name}
-            </Link>
-          </>
-        )}
-        <span>/</span>
-        <span className="text-foreground">{inst.name}</span>
+    <DetailShell>
+      <nav aria-label="Breadcrumb" className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+        <Link href="/universities" className="hover:text-primary">Universities</Link><span>/</span>
+        <Link href={`/universities/${instructor.universitySlug}`} className="hover:text-primary">{instructor.universityName}</Link><span>/</span><span className="text-foreground">{instructor.fullName}</span>
       </nav>
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-6">
-        {/* Avatar placeholder */}
-        <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-          <GraduationCap className="size-8 text-primary" />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10"><GraduationCap className="size-8 text-primary" /></div>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold leading-tight">{instructor.fullName}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{[instructor.title, instructor.department].filter(Boolean).join(" · ")}</p>
+          <Link href={`/universities/${instructor.universitySlug}`} className="mt-1 inline-block text-sm text-primary hover:underline">{instructor.universityName}</Link>
+          <DetailRating value={instructor.scores.overall} reviewCount={instructor.reviewCount} />
         </div>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold">{inst.name}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {inst.role} · {inst.department}
-          </p>
-          {uni && (
-            <Link
-              href={`/universities/${uni.id}`}
-              className="text-xs text-primary hover:underline flex items-center gap-1 mt-1"
-            >
-              <BookOpen className="size-3" /> {uni.name}
-            </Link>
-          )}
-          <div className="flex items-center gap-2 mt-2">
-            <StarRating value={inst.scores.overall} showValue />
-            <span className="text-sm text-muted-foreground">{inst.reviewCount} demo reviews</span>
-            <Badge variant="secondary" className="text-xs font-normal">
-              Sample data
-            </Badge>
-          </div>
-        </div>
-        <div className="shrink-0">
-          <ReviewComposer targetType="instructor" targetId={id} targetName={inst.name} />
-        </div>
+        <ServerReviewComposer targetType="instructor" targetId={instructor.id} universityId={instructor.universityId} targetName={instructor.fullName} />
       </div>
-
-      <Separator className="mb-6" />
-
-      <div className="space-y-6">
-        {/* Bio */}
-        <div>
-          <h2 className="font-semibold mb-2">About</h2>
-          <p className="text-sm text-muted-foreground leading-relaxed">{inst.bio}</p>
-        </div>
-
-        {/* Scores */}
-        <div>
-          <h2 className="font-semibold mb-3">
-            Category scores
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              — demo, {inst.reviewCount} responses
-            </span>
-          </h2>
-          <div className="space-y-3 max-w-xl">
-            {scoreLabels.map(({ key, label }) => (
-              <ScoreBar key={key} label={label} value={inst.scores[key]} />
-            ))}
-          </div>
-        </div>
-
-        {/* Courses */}
-        {instCourses.length > 0 && (
-          <div>
-            <h2 className="font-semibold mb-3">Courses taught</h2>
-            <div className="space-y-2">
-              {instCourses.map((course) => {
-                if (!course) return null;
-                return (
-                  <Link
-                    key={course.id}
-                    href={`/courses/${course.id}`}
-                    className="flex items-center justify-between gap-3 border border-border rounded-lg p-3 hover:border-primary/40 transition-colors group"
-                  >
-                    <div>
-                      <p className="font-medium text-sm group-hover:text-primary transition-colors">
-                        {course.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {course.code} · {course.credits} ECTS · {course.semester}
-                      </p>
-                    </div>
-                    <StarRating value={course.scores.overall} size="sm" showValue />
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Reviews */}
-        <div>
-          <h2 className="font-semibold mb-3">Demo reviews</h2>
-          {instReviews.length > 0 ? (
-            <div className="space-y-3">
-              {instReviews.map((r) => (
-                <ReviewCard key={r.id} review={r} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No demo reviews yet.</p>
-          )}
-          <div className="mt-3">
-            <ReviewComposer targetType="instructor" targetId={id} targetName={inst.name} />
-          </div>
-        </div>
-      </div>
-    </div>
+      <Separator />
+      <section className="space-y-2"><h2 className="font-semibold">About</h2><p className="text-sm leading-relaxed text-muted-foreground">{instructor.bio ?? "No biography is available yet."}</p></section>
+      <section className="space-y-3">
+        <h2 className="font-semibold">Category scores <span className="text-xs font-normal text-muted-foreground">· synthetic sample data</span></h2>
+        <div className="max-w-xl space-y-3">{scoreLabels.map(({ key, label }) => <ScoreBar key={key} label={label} value={instructor.scores[key]} />)}</div>
+      </section>
+      <section className="space-y-3">
+        <h2 className="font-semibold">Courses taught</h2>
+        {instructor.courses.length === 0 ? <p className="text-sm text-muted-foreground">No courses listed yet.</p> : <div className="grid gap-3 sm:grid-cols-2">{instructor.courses.map((course) => (
+          <Link key={course.id} href={`/courses/${course.id}`} className="group rounded-lg border border-border p-4 transition-colors hover:border-primary/40"><h3 className="text-sm font-medium group-hover:text-primary">{course.name}</h3><p className="mt-1 text-xs text-muted-foreground">{course.code} · <span className="capitalize">{course.level}</span></p></Link>
+        ))}</div>}
+      </section>
+      <DetailReviews result={reviews} pathname={`/instructors/${instructor.id}`} searchParams={query} />
+    </DetailShell>
   );
 }

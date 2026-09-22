@@ -1,91 +1,15 @@
-# Repository Workflow
+# Repository workflow
 
-## Workflows
+Every change goes through a PR. Agents do not auto-merge, force-push, deploy, or claim hosted validation from local checks.
 
-### `CI` (`.github/workflows/ci.yml`)
+## CI
 
-**Triggers**: every `pull_request` event; every push to `main`.
+Frontend CI runs `npm ci`, lint, typecheck, offline auth tests, build, and Playwright. Backend CI retains its current database, migration, seed-safety, draft, and catalog suites and makes `npm run test:affiliation` and `npm run test:verification-integration` mandatory. The verification integration suite uses real PostgreSQL with mocked external auth SDK and mail transport. CI does not provision Neon, Resend, DNS, Vercel cron, or a production auth bypass.
 
-**Concurrency**: one run per ref. A new push cancels any still-running job for the same branch or PR.
+Use `PLAYWRIGHT_PORT=3127 npm test` in this integration worktree. Report exact commands and distinguish local, CI, mocked, and configured-provider evidence.
 
-**Permissions**: `contents: read` only — no write access, no secrets, no deployment.
+## Final merge path
 
-**Steps in order**:
+Retain source provenance, including recipient-ledger source `6684364`, independently approved cleanup source `b5fb0c9`, and independently approved catalog source `eed5dc9`, but do not merge or cherry-pick their patches separately. Preserve the approved `55aad06` deployment/testing provenance. After final independent integration review and user approval, merge only PR #9 and close source PRs as superseded to avoid duplicate patches.
 
-| Step | Command | Fails fast |
-|---|---|---|
-| Install | `npm ci` | yes |
-| Lint | `npm run lint` | yes |
-| Type-check | `npm run typecheck` | yes |
-| Build | `npm run build` | yes |
-| Install browsers | `npx playwright install --with-deps chromium` | yes |
-| Smoke tests | `npm test` | yes |
-
-`npm test` runs `playwright test`. The Playwright config starts a **fresh** production server on port 3001 (`reuseExistingServer: false`) using the `npm run build` output from the previous step.
-
-**Failure artifacts**: when any step fails, traces (`test-results/`) and screenshots (`test-screenshots/`) are uploaded as artifact `playwright-failure-<run-id>`, retained 7 days. Download from the Actions run page under *Artifacts*.
-
----
-
-### `Label PR` (`.github/workflows/label.yml`)
-
-**Trigger**: `pull_request_target` — opened, synchronize, reopened.
-
-**What it does**: applies labels from `.github/labeler.yml` based on which files the PR touches. Uses `actions/labeler@v5`, which reads the changed-file list via the GitHub API. **No code is checked out. No PR code is executed.**
-
-**Permissions**: `pull-requests: write` only.
-
-**Label mappings**:
-
-| Label | Matched paths |
-|---|---|
-| `frontend` | `app/**`, `components/**`, `hooks/**`, `lib/**`, `tests/**`, `playwright.config.ts`, `**/*.css`, `next.config.*`, `.github/previews/**` |
-| `backend` | `server/**`, `api/**`, `prisma/**`, `migrations/**` |
-| `ci` | `.github/workflows/**`, `.github/labeler.yml` |
-| `documentation` | `docs/**`, `README.md`, `AGENTS.md`, `.github/PULL_REQUEST_TEMPLATE.md` |
-
-Existing repo labels `enhancement` and `documentation` are applied manually by contributors or the orchestrator.
-
----
-
-## Bootstrap status
-
-**CI** (`pull_request` trigger) — active now on all PRs, including PR#2. No merge to `main` needed for CI to run.
-
-**Auto-labeler** (`pull_request_target` trigger) — activates after the workflow file lands on `main` (i.e. after PR#2 merges).
-
-**Labels** — `frontend`, `backend`, `ci`, and `documentation` labels are created in the repo. The commands below are kept for future repos or label recreation:
-
-```bash
-gh label create frontend  --repo <owner>/<repo> \
-  --color "e4710f" --description "App, components, hooks, lib, tests, styles"
-gh label create backend   --repo <owner>/<repo> \
-  --color "0075ca" --description "Server, API, database, migrations"
-gh label create ci        --repo <owner>/<repo> \
-  --color "f9c74f" --description "GitHub Actions and CI configuration"
-```
-
-Labels are documented in `.github/labels.yml` for reference.
-
-### Enable branch protection (after first successful check run)
-
-Wait for a CI run to complete successfully before configuring required status checks. Enabling required checks before any check run has recorded a name causes GitHub to treat every subsequent PR as failing the check even when the job passes.
-
-1. Go to **Settings → Branches → Add rule** for `main`.
-2. Enable **Require status checks to pass before merging**.
-3. Search for and add: `build-and-test`.
-4. Enable **Require branches to be up to date before merging**.
-5. Do **not** enable auto-merge or force-push bypass.
-
----
-
-## PR process
-
-- Every change goes through a PR. No direct commits to `main`.
-- No auto-merge. PRs are merged by a human after review.
-- No deployment or production operations are triggered by CI — it is build and test only.
-- Use the PR template (`.github/PULL_REQUEST_TEMPLATE.md`): describe the change and why, fill the validation checklist, attach screenshots for frontend changes.
-
-## Action version pinning
-
-The workflows use `actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`, and `actions/labeler@v5`. These are the current stable major-version tags. For stricter supply-chain security, replace each tag with a full commit SHA from the action's releases page and add a comment with the tag it resolves to.
+PR #9's final delta is a draft pending final independent integration review and user approval. Managed Auth, Resend/DNS, authorized mailboxes, and cron must be configured before the configured acceptance gate.

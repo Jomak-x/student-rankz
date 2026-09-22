@@ -1,0 +1,106 @@
+name: Backend
+
+on:
+  pull_request:
+  push:
+    branches: [main, "polly/**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    name: Database (ephemeral PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Configure isolated PostgreSQL URLs
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${POSTGRES_PORT}/postgres" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgres://postgres:postgres@localhost:${POSTGRES_PORT}/postgres" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Database tests (migration, constraints, repeatable seed)
+        run: npm run test:db
+
+      - name: Affiliation service and retention tests
+        run: npm run test:affiliation
+
+      - name: Catalog service tests
+        run: npm run test:catalog
+
+      - name: Migration tracking tests
+        run: npm run test:migrations
+
+      - name: Verification HTTP integration with mocked external providers
+        run: npm run test:verification-integration
+
+      - name: Private draft service tests
+        run: npm run test:drafts
+
+      - name: Build integrated app without service configuration
+        run: npm run build
+        env:
+          DATABASE_URL: ""
+          NEON_AUTH_BASE_URL: ""
+          NEON_AUTH_COOKIE_SECRET: ""
+
+      - name: Install integration browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Real PostgreSQL browser integration
+        run: npm run test:integration
+
+      - name: Verify committed migrations apply via drizzle-kit
+        run: npx drizzle-kit migrate
+
+      - name: Verify seed CLI refuses to run without explicit opt-in
+        run: |
+          if npm run db:seed; then
+            echo "::error::Seed CLI must refuse to run without SEED_SCOPE and --yes"
+            exit 1
+          fi
+          echo "Seed CLI correctly refused without explicit opt-in"
+
+      - name: Upload integration failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-failure-${{ github.run_id }}
+          path: |
+            test-results/integration/
+            test-screenshots/integration/
+          retention-days: 7
